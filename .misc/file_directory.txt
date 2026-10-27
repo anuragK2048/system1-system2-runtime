@@ -1,0 +1,58 @@
+system1-system2-runtime/
+├── pyproject.toml              # Dependencies & CLI entrypoints (uv)
+├── .python-version             # Python version (3.12)
+├── .env                        # API keys (MODAL_TOKEN_ID, LLAMA/GROQ API keys)
+├── README.md
+│
+├── assets/                     # Simulation 3D Models
+│   ├── quadcopter.xml          # MuJoCo MJCF model for the drone
+│   └── scene.xml               # Simulation arena, lighting & floor plane
+│
+├── src/
+│   └── runtime/
+│       ├── __init__.py
+│       ├── main.py             # Main CLI / runner entrypoint
+│       │
+│       ├── sim/                # [Step 1] 500Hz MuJoCo Physics
+│       │   ├── __init__.py
+│       │   ├── drone_env.py    # Dual drone runner (Standard Drone vs S1+S2 Drone)
+│       │   ├── dynamics.py     # State extraction (attitude, angular vel, motors)
+│       │   └── chaos.py        # The 3 chaos injectors (motor cut, pendulum, noise)
+│       │
+│       ├── controller/         # [System 1] 500Hz Fast Reflexes
+│       │   ├── __init__.py
+│       │   ├── pid.py          # Fast attitude/altitude PID loop
+│       │   ├── limp_mode.py    # Softened stabilization active during 0.5s AI lag
+│       │   └── patcher.py      # Mid-flight parameter injection (gains, motor mixer)
+│       │
+│       ├── detector/           # [Step 2] The Trouble Detector
+│       │   ├── __init__.py
+│       │   ├── monitor.py      # Threshold watcher (excess tilt, drift, vibration)
+│       │   └── buffer.py       # Rolling 0.5s telemetry flight recorder
+│       │
+│       ├── brain/              # [Step 3] System 2 AI Diagnosis
+│       │   ├── __init__.py
+│       │   ├── llama_agent.py  # Prompting Meta Llama for failure diagnosis
+│       │   └── schema.py       # Structured Pydantic output (diagnosis, candidate parameter ranges)
+│       │
+│       ├── cloud/              # [Step 4] Modal Parallel Sandboxes
+│       │   ├── __init__.py
+│       │   ├── modal_app.py    # Modal app deployment definition
+│       │   └── rollout.py      # 32 parallel 1-second forward simulations & scoring
+│       │
+│       └── server/             # Live Telemetry & UI Bridge
+│           ├── __init__.py
+│           ├── app.py          # FastAPI application
+│           └── stream.py       # WebSocket broadcaster (60Hz telemetry to browser)
+│
+└── frontend/                   # [Step 5] 3-Panel 90-Second Hackathon Demo
+    ├── package.json            # Vite + React / Three.js
+    └── src/
+        ├── components/
+        │   ├── StandardDroneView.tsx   # Panel 1: Naive drone crashing
+        │   ├── AdaptiveDroneView.tsx   # Panel 2: S1+S2 drone recovering
+        │   ├── BrainView.tsx           # Panel 3: Diagnosis + 32 ghost test paths
+        │   └── ChaosButtons.tsx        # 3 Red chaos trigger buttons
+        ├── hooks/
+        │   └── useTelemetry.ts         # WebSocket link to Python runtime
+        └── App.tsx
