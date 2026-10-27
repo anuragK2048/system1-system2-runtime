@@ -201,7 +201,12 @@ class System1Controller:
             attitude=quat_ned,
             angular_velocity=omega_ned,
         )
-        setpoint = QuadrotorSetpoint(position=desired_pos_ned)
+        # Convert feedforward force into feedforward acceleration in NED
+        acc_ff_ned = np.zeros(3, dtype=np.float32)
+        if active_ff is not None:
+            acc_ff_ned = self._T @ (np.array(active_ff, dtype=np.float32) / self.mass)
+
+        setpoint = QuadrotorSetpoint(position=desired_pos_ned, acceleration=acc_ff_ned)
 
         # ----------------------------------------------------------------------
         # 3. Geometric Baseline Controller (SE(3) tracking)
@@ -259,16 +264,6 @@ class System1Controller:
         # u_total is [F_thrust, M_x, M_y, M_z] in NED
         F_z = float(u_total[0])
         M_mujoco = self._T @ u_total[1:4]
-
-        # Apply System 2 feedforward force offset if present
-        if active_ff is not None:
-            # Vertical offset directly adds to collective thrust
-            F_z += float(active_ff[2])
-            # Horizontal force offset creates lean moments
-            # Fx > 0 commands pitch down (-My); Fy > 0 commands roll right (+Mx)
-            lever_arm = 0.05
-            M_mujoco[1] -= float(active_ff[0]) * lever_arm
-            M_mujoco[0] += float(active_ff[1]) * lever_arm
 
         demands = np.array([F_z, M_mujoco[0], M_mujoco[1], M_mujoco[2]], dtype=np.float32)
 

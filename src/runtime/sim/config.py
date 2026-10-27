@@ -158,7 +158,7 @@ class ChaosConfig:
     
     # Chaos 3: Sensor Noise (Vibration / noisy IMU)
     # Adds zero-mean Gaussian noise to gyroscope angular velocity readings
-    sensor_noise_std: float = 3.5  # rad/s standard deviation
+    sensor_noise_std: float = 0.8  # rad/s standard deviation (severe chatter without numeric NaN explosion)
     
     # Chaos 4: External Wind Gust
     # Lateral push applied directly to the drone body
