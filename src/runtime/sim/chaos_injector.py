@@ -82,7 +82,7 @@ class ChaosManager:
         print("  [Shift + 1] (or 6) 💥 CUT MOTOR 1 POWER BY 60%   (Chipped prop)")
         print("  [Shift + 2] (or 7) 📦 ATTACH SWINGING WEIGHT     (0.35kg red ball)")
         print("  [Shift + 3] (or 8) ⚡ INJECT SENSOR NOISE        (Gyro chatter)")
-        print("  [Shift + 4] (or 9) 💨 BLOW WIND GUST (5.0N)      (Disturbance)")
+        print("  [Shift + 4] (or 9) 💨 5.0N LATERAL WIND          (Toggle On/Off)")
         print("  [Shift + 5] (or 0) 🔄 RESET DRONE                (Restore stable hover)")
         print("  [Spacebar]         ⏸  PAUSE / RESUME")
         print("-" * 70)
@@ -129,13 +129,13 @@ class ChaosManager:
             print(f"\n🚨 [CHAOS 3] Sensor Noise: {status}")
 
         # ----------------------------------------------------------------------
-        # Chaos 4: 5.0N Wind Gust
+        # Chaos 4: 5.0N Sustained Wind
         # Triggered by: Shift + 4 ('$' = 36, or key 52 with Shift) OR key '9' (57)
         # ----------------------------------------------------------------------
         elif keycode == 36 or (keycode == 52 and shift) or keycode == 57:
-            self.active_chaos["wind_gust"] = True
-            self.gust_end_time = time.time() + self.cfg.wind_gust_duration_seconds
-            print("\n💨 [DISTURBANCE] 5.0N Wind Gust hit the drone! (Notice how standard PID tilts to fight it and recovers)")
+            self.active_chaos["wind_gust"] = not self.active_chaos["wind_gust"]
+            status = "🔴 ACTIVE (5.0N Crosswind pushing +X)" if self.active_chaos["wind_gust"] else "🟢 OFF (Calm air)"
+            print(f"\n💨 [CHAOS 4] Sustained Wind: {status}")
 
         # ----------------------------------------------------------------------
         # Simulation Reset: Restore level hover and clear all anomalies
@@ -170,7 +170,9 @@ class ChaosManager:
         payload_body_id: int,
         tether_geom_id: int,
         bob_geom_id: int,
-        payload_mass: float
+        payload_mass: float,
+        qpos_adr: int = 7,
+        qvel_adr: int = 6,
     ) -> None:
         """Simulates physical coupling or unhooking of the swinging cargo.
 
@@ -184,12 +186,15 @@ class ChaosManager:
           - Applies an exact upward counter-force (mp * 9.81) to neutralize its mass.
           - Resets swing angles to zero.
         """
+        if not hasattr(self, "_kicked_payloads"):
+            self._kicked_payloads = set()
+
         if self.active_chaos["swinging_weight"]:
             # Newly attached: impart an initial swing angle and velocity
-            if not self._was_payload_active:
-                data.qpos[7] = self.cfg.payload_kick_angle_rad  # ~17 degrees
-                data.qvel[6] = self.cfg.payload_kick_velocity   # 1.5 rad/s
-                self._was_payload_active = True
+            if payload_body_id not in self._kicked_payloads:
+                data.qpos[qpos_adr] = self.cfg.payload_kick_angle_rad  # ~17 degrees
+                data.qvel[qvel_adr] = self.cfg.payload_kick_velocity   # 1.5 rad/s
+                self._kicked_payloads.add(payload_body_id)
 
             # Make tether (gold) and bob (red) visible
             model.geom_rgba[tether_geom_id] = [1.0, 0.85, 0.10, 1.0]
@@ -198,7 +203,7 @@ class ChaosManager:
             # Clear counter-force so full gravity pulls down on the drone
             data.xfrc_applied[payload_body_id, :] = 0.0
         else:
-            self._was_payload_active = False
+            self._kicked_payloads.discard(payload_body_id)
 
             # Make tether and bob invisible
             model.geom_rgba[tether_geom_id] = [1.0, 0.85, 0.10, 0.0]
@@ -206,8 +211,8 @@ class ChaosManager:
 
             # Neutralize payload weight so the drone feels exactly 0.00 kg
             data.xfrc_applied[payload_body_id, 2] = payload_mass * 9.81
-            data.qpos[7:9] = 0.0
-            data.qvel[6:8] = 0.0
+            data.qpos[qpos_adr : qpos_adr + 2] = 0.0
+            data.qvel[qvel_adr : qvel_adr + 2] = 0.0
 
     def apply_wind_gust(
         self,
@@ -217,12 +222,8 @@ class ChaosManager:
     ) -> None:
         """Applies external wind force to the drone body if active."""
         if self.active_chaos["wind_gust"]:
-            if current_time < self.gust_end_time:
-                # Apply lateral force along the world X axis
-                data.xfrc_applied[drone_body_id, 0] = self.cfg.wind_gust_force_newtons
-            else:
-                # Gust duration expired; deactivate
-                self.active_chaos["wind_gust"] = False
+            # Apply continuous lateral force along the world X axis
+            data.xfrc_applied[drone_body_id, 0] = self.cfg.wind_gust_force_newtons
 
     def corrupt_sensor_data(self, omega: np.ndarray) -> np.ndarray:
         """Injects high-frequency Gaussian vibration noise into gyro rates."""

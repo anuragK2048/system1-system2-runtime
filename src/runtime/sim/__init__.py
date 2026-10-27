@@ -11,20 +11,28 @@ from runtime.sim.config import (
     SimConfig,
     DroneConfig,
     PIDConfig,
+    L1Config,
     ChaosConfig,
     SCENE_PATH,
+    DUAL_SCENE_PATH,
 )
 from runtime.sim.system1_controller import System1Controller
 from runtime.sim.chaos_injector import ChaosManager
 from runtime.sim.simulator import DroneSimulator
+from runtime.sim.dual_simulator import DualDroneSimulator
+from runtime.sim.bridge import System1System2Bridge
 
 __all__ = [
     "DroneSimulator",
+    "DualDroneSimulator",
     "System1Controller",
     "ChaosManager",
+    "System1System2Bridge",
     "SimConfig",
     "DroneConfig",
     "PIDConfig",
+    "L1Config",
     "ChaosConfig",
     "SCENE_PATH",
+    "DUAL_SCENE_PATH",
 ]

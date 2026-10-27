@@ -21,10 +21,12 @@ from runtime.sim.config import (
     SimConfig,
     DroneConfig,
     PIDConfig,
+    L1Config,
     ChaosConfig,
 )
 from runtime.sim.system1_controller import System1Controller
 from runtime.sim.chaos_injector import ChaosManager
+from runtime.sim.bridge import System1System2Bridge
 
 
 class DroneSimulator:
@@ -33,8 +35,9 @@ class DroneSimulator:
     Attributes:
         sim_cfg (SimConfig): Timestep, FPS, and camera tracking parameters.
         drone_cfg (DroneConfig): Physical drone mass, weight, and limits.
-        controller (System1Controller): 500 Hz PID reflex controller.
+        controller (System1Controller): 500 Hz reflex controller (L1 Adaptive or PID).
         chaos (ChaosManager): Failure mode injector and keyboard listener.
+        bridge (System1System2Bridge): Async coordination bridge with System 2.
     """
 
     def __init__(
@@ -44,6 +47,9 @@ class DroneSimulator:
         drone_cfg: Optional[DroneConfig] = None,
         pid_cfg: Optional[PIDConfig] = None,
         chaos_cfg: Optional[ChaosConfig] = None,
+        l1_cfg: Optional[L1Config] = None,
+        bridge: Optional[System1System2Bridge] = None,
+        controller_mode: str = "l1_adaptive",
     ) -> None:
         self.scene_path = scene_path or SCENE_PATH
         if not self.scene_path.exists():
@@ -51,7 +57,14 @@ class DroneSimulator:
 
         self.sim_cfg = sim_cfg or SimConfig()
         self.drone_cfg = drone_cfg or DroneConfig()
-        self.controller = System1Controller(drone_cfg=self.drone_cfg, pid_cfg=pid_cfg)
+        self.controller = System1Controller(
+            drone_cfg=self.drone_cfg,
+            l1_cfg=l1_cfg,
+            pid_cfg=pid_cfg,
+            bridge=bridge,
+            mode=controller_mode,
+        )
+        self.bridge = self.controller.bridge
         self.chaos = ChaosManager(cfg=chaos_cfg)
 
         # ----------------------------------------------------------------------
@@ -91,13 +104,17 @@ class DroneSimulator:
         self.data.qfrc_applied[:] = 0.0
         self.data.xfrc_applied[:] = 0.0
 
+        # Reset L1 adaptive observer state and bridge
+        self.controller.reset_l1_state()
+        self.bridge.reset()
+
     def step_simulation(self, current_time: float) -> dict:
         """Executes a single 500 Hz simulation time-step.
 
         Order of operations:
           1. Apply physical perturbations (cargo gravity, wind gust).
           2. Read noisy sensor telemetry.
-          3. Compute System 1 PID motor demands.
+          3. Compute System 1 L1 Adaptive / PID motor demands.
           4. Apply actuator hardware degradation (prop failure).
           5. Advance MuJoCo multibody physics (`mj_step`).
 
@@ -131,9 +148,14 @@ class DroneSimulator:
         # 4. Corrupt gyro rates if sensor noise chaos is active
         omega = self.chaos.corrupt_sensor_data(raw_omega)
 
-        # 5. Compute System 1 PID motor demands
+        # 5. Compute System 1 motor demands (L1 Adaptive + Geometric loop)
         commanded_thrust, diag = self.controller.compute_motor_thrusts(
-            pos, vel, quat, omega
+            pos,
+            vel,
+            quat,
+            omega,
+            sim_time=float(self.data.time),
+            dt=self.sim_cfg.physics_timestep,
         )
 
         # 6. Apply actuator degradation if Motor 1 failure is active
@@ -212,6 +234,31 @@ class DroneSimulator:
         active_list = [k for k, v in self.chaos.active_chaos.items() if v]
         chaos_str = ", ".join(active_list) if active_list else "NONE (Stable)"
 
+        # Check L1 disturbance estimates if present
+        f_dist = telemetry.get("sigma_f_hat")
+        m_dist = telemetry.get("sigma_M_hat")
+        l1_str = ""
+        if f_dist is not None and m_dist is not None:
+            l1_str = f" | L1 Est: F=[{f_dist[0]:+.1f},{f_dist[1]:+.1f},{f_dist[2]:+.1f}]N"
+
+        # Check Active System 2 Patch
+        active_patch = self.bridge.get_active_patch()
+        llm_str = ""
+        if active_patch:
+            parts = []
+            if active_patch.feedforward_force_offset:
+                ff = active_patch.feedforward_force_offset
+                parts.append(f"FF=[{ff[0]:+.1f},{ff[1]:+.1f},{ff[2]:+.1f}]N")
+            if active_patch.motor_trim_scale:
+                tr = active_patch.motor_trim_scale
+                parts.append(f"Trim=[{tr[0]:.2f},{tr[1]:.2f},{tr[2]:.2f},{tr[3]:.2f}]")
+            llm_str = f" | 🧠 [LLM: {', '.join(parts)}]"
+
+        # Check Tier 2 Trigger
+        if telemetry.get("is_triggered") and telemetry.get("trigger_reasons"):
+            trigger_msg = telemetry["trigger_reasons"][0]
+            print(f"🚨 [TIER 2 TRIGGER] {trigger_msg}")
+
         # Detect crash
         if z < 0.12 and any(self.chaos.active_chaos.values()):
             print(
@@ -223,10 +270,10 @@ class DroneSimulator:
             sw_y = np.degrees(self.data.qpos[8])
             print(
                 f"Tele: Alt={z:.2f}m | Roll={roll_deg:+.1f}° | "
-                f"Payload Swing=({sw_x:+.1f}°, {sw_y:+.1f}°) 📦 [Attached]"
+                f"Payload Swing=({sw_x:+.1f}°, {sw_y:+.1f}°) 📦 [Attached]{l1_str}{llm_str}"
             )
         else:
             print(
                 f"Tele: Alt={z:.2f}m | Pos=({x:+.1f},{y:+.1f}) | "
-                f"Roll={roll_deg:+.1f}° | Chaos: [{chaos_str}]"
+                f"Roll={roll_deg:+.1f}° | Chaos: [{chaos_str}]{l1_str}{llm_str}"
             )
