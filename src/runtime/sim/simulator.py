@@ -104,8 +104,9 @@ class DroneSimulator:
         self.data.qfrc_applied[:] = 0.0
         self.data.xfrc_applied[:] = 0.0
 
-        # Reset L1 adaptive observer state
+        # Reset L1 adaptive observer state and bridge
         self.controller.reset_l1_state()
+        self.bridge.reset()
 
     def step_simulation(self, current_time: float) -> dict:
         """Executes a single 500 Hz simulation time-step.
@@ -153,7 +154,7 @@ class DroneSimulator:
             vel,
             quat,
             omega,
-            sim_time=current_time,
+            sim_time=float(self.data.time),
             dt=self.sim_cfg.physics_timestep,
         )
 
@@ -240,6 +241,19 @@ class DroneSimulator:
         if f_dist is not None and m_dist is not None:
             l1_str = f" | L1 Est: F=[{f_dist[0]:+.1f},{f_dist[1]:+.1f},{f_dist[2]:+.1f}]N"
 
+        # Check Active System 2 Patch
+        active_patch = self.bridge.get_active_patch()
+        llm_str = ""
+        if active_patch:
+            parts = []
+            if active_patch.feedforward_force_offset:
+                ff = active_patch.feedforward_force_offset
+                parts.append(f"FF=[{ff[0]:+.1f},{ff[1]:+.1f},{ff[2]:+.1f}]N")
+            if active_patch.motor_trim_scale:
+                tr = active_patch.motor_trim_scale
+                parts.append(f"Trim=[{tr[0]:.2f},{tr[1]:.2f},{tr[2]:.2f},{tr[3]:.2f}]")
+            llm_str = f" | 🧠 [LLM: {', '.join(parts)}]"
+
         # Check Tier 2 Trigger
         if telemetry.get("is_triggered") and telemetry.get("trigger_reasons"):
             trigger_msg = telemetry["trigger_reasons"][0]
@@ -256,10 +270,10 @@ class DroneSimulator:
             sw_y = np.degrees(self.data.qpos[8])
             print(
                 f"Tele: Alt={z:.2f}m | Roll={roll_deg:+.1f}° | "
-                f"Payload Swing=({sw_x:+.1f}°, {sw_y:+.1f}°) 📦 [Attached]{l1_str}"
+                f"Payload Swing=({sw_x:+.1f}°, {sw_y:+.1f}°) 📦 [Attached]{l1_str}{llm_str}"
             )
         else:
             print(
                 f"Tele: Alt={z:.2f}m | Pos=({x:+.1f},{y:+.1f}) | "
-                f"Roll={roll_deg:+.1f}° | Chaos: [{chaos_str}]{l1_str}"
+                f"Roll={roll_deg:+.1f}° | Chaos: [{chaos_str}]{l1_str}{llm_str}"
             )

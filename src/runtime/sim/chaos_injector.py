@@ -82,7 +82,7 @@ class ChaosManager:
         print("  [Shift + 1] (or 6) 💥 CUT MOTOR 1 POWER BY 60%   (Chipped prop)")
         print("  [Shift + 2] (or 7) 📦 ATTACH SWINGING WEIGHT     (0.35kg red ball)")
         print("  [Shift + 3] (or 8) ⚡ INJECT SENSOR NOISE        (Gyro chatter)")
-        print("  [Shift + 4] (or 9) 💨 BLOW WIND GUST (5.0N)      (Disturbance)")
+        print("  [Shift + 4] (or 9) 💨 5.0N LATERAL WIND          (Toggle On/Off)")
         print("  [Shift + 5] (or 0) 🔄 RESET DRONE                (Restore stable hover)")
         print("  [Spacebar]         ⏸  PAUSE / RESUME")
         print("-" * 70)
@@ -129,13 +129,13 @@ class ChaosManager:
             print(f"\n🚨 [CHAOS 3] Sensor Noise: {status}")
 
         # ----------------------------------------------------------------------
-        # Chaos 4: 5.0N Wind Gust
+        # Chaos 4: 5.0N Sustained Wind
         # Triggered by: Shift + 4 ('$' = 36, or key 52 with Shift) OR key '9' (57)
         # ----------------------------------------------------------------------
         elif keycode == 36 or (keycode == 52 and shift) or keycode == 57:
-            self.active_chaos["wind_gust"] = True
-            self.gust_end_time = time.time() + self.cfg.wind_gust_duration_seconds
-            print("\n💨 [DISTURBANCE] 5.0N Wind Gust hit the drone! (Notice how standard PID tilts to fight it and recovers)")
+            self.active_chaos["wind_gust"] = not self.active_chaos["wind_gust"]
+            status = "🔴 ACTIVE (5.0N Crosswind pushing +X)" if self.active_chaos["wind_gust"] else "🟢 OFF (Calm air)"
+            print(f"\n💨 [CHAOS 4] Sustained Wind: {status}")
 
         # ----------------------------------------------------------------------
         # Simulation Reset: Restore level hover and clear all anomalies
@@ -217,12 +217,8 @@ class ChaosManager:
     ) -> None:
         """Applies external wind force to the drone body if active."""
         if self.active_chaos["wind_gust"]:
-            if current_time < self.gust_end_time:
-                # Apply lateral force along the world X axis
-                data.xfrc_applied[drone_body_id, 0] = self.cfg.wind_gust_force_newtons
-            else:
-                # Gust duration expired; deactivate
-                self.active_chaos["wind_gust"] = False
+            # Apply continuous lateral force along the world X axis
+            data.xfrc_applied[drone_body_id, 0] = self.cfg.wind_gust_force_newtons
 
     def corrupt_sensor_data(self, omega: np.ndarray) -> np.ndarray:
         """Injects high-frequency Gaussian vibration noise into gyro rates."""

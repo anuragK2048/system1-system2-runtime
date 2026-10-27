@@ -18,14 +18,18 @@ class FastTriggerEvent:
     tilt_deg: float
     gyro_norm: float
     force_residual_norm: float
+    force_residual_vec: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    moment_residual_vec: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
 
     def format_trigger_header(self) -> str:
         """Formats the trigger header for LLM prompts."""
         reasons_str = "; ".join(self.reasons)
+        fx, fy, fz = self.force_residual_vec
+        f_vec_str = f", F_dist=[{fx:+.1f},{fy:+.1f},{fz:+.1f}]N" if (abs(fx) > 0.5 or abs(fy) > 0.5 or abs(fz) > 0.5) else f", |F_dist|={self.force_residual_norm:.1f}N"
         return (
             f"TRIGGER: {reasons_str} "
             f"(pos_err={self.pos_error_norm:.2f}m, tilt={self.tilt_deg:.1f}°, "
-            f"|gyro|={self.gyro_norm:.2f}rad/s, |F_dist|={self.force_residual_norm:.1f}N)"
+            f"|gyro|={self.gyro_norm:.2f}rad/s{f_vec_str})"
         )
 
 
@@ -60,8 +64,9 @@ class TelemetrySummary:
     motor_saturation_pct: List[float] # % of time at 0N or 13N
 
     # 4. Estimated Unmodeled Disturbance (from L1 disturbance observer)
-    unmodeled_force_disturbance: List[float]   # [Fx, Fy, Fz] in Newtons
-    unmodeled_moment_disturbance: List[float]  # [Mx, My, Mz] in N*m
+    unmodeled_force_disturbance: List[float]   # [Fx, Fy, Fz] in Newtons (1.0s mean)
+    unmodeled_moment_disturbance: List[float]  # [Mx, My, Mz] in N*m (1.0s mean)
+    instantaneous_force_disturbance: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
 
     def format_llm_text(self, trigger_header: Optional[str] = None) -> str:
         """Produces the exact prompt text format described in .anurag/tier_2_lifecycle.md."""
@@ -93,13 +98,27 @@ class TelemetrySummary:
         )
 
         fx, fy, fz = self.unmodeled_force_disturbance
+        cur_fx, cur_fy, cur_fz = getattr(self, "instantaneous_force_disturbance", [fx, fy, fz])
         mx, my, mz = self.unmodeled_moment_disturbance
+        # In ENU coordinates, downward gravity load is negative Fz
+        f_ext_z = -abs(fz) if fz > 0.5 else fz
+        cur_f_ext_z = -abs(cur_fz) if cur_fz > 0.5 else cur_fz
+
+        if abs(cur_fx - fx) > 1.0 or abs(cur_fy - fy) > 1.0 or abs(cur_fz - fz) > 1.0:
+            lines.append(
+                f"- External Disturbance Force on Drone: Current=[Fx={cur_fx:+.2f}N, Fy={cur_fy:+.2f}N, Fz={cur_f_ext_z:+.2f}N], "
+                f"1.0s Mean=[Fx={fx:+.2f}N, Fy={fy:+.2f}N, Fz={f_ext_z:+.2f}N]"
+                f"{' (downward payload/gravity load)' if cur_f_ext_z < -0.5 else ''}"
+            )
+        else:
+            lines.append(
+                f"- External Disturbance Force on Drone: Fx = {fx:+.2f}N, Fy = {fy:+.2f}N, Fz = {f_ext_z:+.2f}N"
+                f"{' (downward payload/gravity load)' if f_ext_z < -0.5 else ''}"
+            )
         lines.append(
-            f"- Physics Residual (L1 Unmodeled Force): Fx = {fx:+.2f}N, Fy = {fy:+.2f}N, Fz = {fz:+.2f}N"
+            f"- External Disturbance Moment: Mx = {mx:+.3f}Nm, My = {my:+.3f}Nm, Mz = {mz:+.3f}Nm"
         )
-        lines.append(
-            f"- Physics Residual (L1 Unmodeled Moment): Mx = {mx:+.3f}Nm, My = {my:+.3f}Nm, Mz = {mz:+.3f}Nm"
-        )
+        return "\n".join(lines)
         return "\n".join(lines)
 
     def to_dict(self) -> Dict[str, object]:

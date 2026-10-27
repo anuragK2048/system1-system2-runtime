@@ -115,11 +115,15 @@ class System1System2Bridge:
                 f"Angular rate ({gyro_norm:.2f} rad/s) spiked above threshold ({self.gyro_norm_threshold:.2f} rad/s)"
             )
         if force_res_norm > self.force_residual_threshold:
+            dominant_axis = "X" if abs(sigma_f_hat[0]) >= max(abs(sigma_f_hat[1]), abs(sigma_f_hat[2])) else ("Y" if abs(sigma_f_hat[1]) >= abs(sigma_f_hat[2]) else "Z")
+            idx = {"X": 0, "Y": 1, "Z": 2}[dominant_axis]
+            sign_str = "+" if sigma_f_hat[idx] >= 0 else "-"
             reasons.append(
-                f"L1 estimated disturbance force ({force_res_norm:.1f}N) spiked above threshold ({self.force_residual_threshold:.1f}N)"
+                f"L1 estimated disturbance force ({force_res_norm:.1f}N along {sign_str}{dominant_axis}) spiked above threshold ({self.force_residual_threshold:.1f}N)"
             )
 
-        is_triggered = len(reasons) > 0
+        # Ignore triggers during initial spawn ascent warmup
+        is_triggered = (len(reasons) > 0) and (sim_time >= 1.0)
 
         sample = {
             "time": sim_time,
@@ -152,6 +156,8 @@ class System1System2Bridge:
                         tilt_deg=tilt_deg,
                         gyro_norm=gyro_norm,
                         force_residual_norm=force_res_norm,
+                        force_residual_vec=[float(x) for x in sigma_f_hat],
+                        moment_residual_vec=[float(x) for x in sigma_M_hat],
                     )
                     self._trigger_history.append(event)
                     self._trigger_event.set()
@@ -178,12 +184,27 @@ class System1System2Bridge:
         """Returns True if a trigger event is currently pending."""
         return self._trigger_event.is_set()
 
-    def get_latest_trigger_event(self) -> Optional[FastTriggerEvent]:
-        """Retrieves the most recent trigger event."""
+    def clear_trigger(self) -> None:
+        """Clears the pending trigger event."""
+        self._trigger_event.clear()
+
+    def get_latest_trigger_event(self, max_age_s: float = 2.0, current_time: Optional[float] = None) -> Optional[FastTriggerEvent]:
+        """Retrieves the most recent trigger event if recent."""
         with self._lock:
-            if self._trigger_history:
-                return self._trigger_history[-1]
-            return None
+            if not self._trigger_history:
+                return None
+            event = self._trigger_history[-1]
+            if current_time is not None and (current_time - event.timestamp) > max_age_s:
+                return None
+            return event
+
+    def reset(self) -> None:
+        """Resets the bridge history, triggers, and active patches."""
+        with self._lock:
+            self._buffer.clear()
+            self._trigger_history.clear()
+            self._trigger_event.clear()
+            self._active_patch = None
 
     def get_telemetry_summary(self, window_seconds: float = 1.0) -> TelemetrySummary:
         """Computes statistical telemetry summary over the sliding window.
@@ -268,6 +289,10 @@ class System1System2Bridge:
         sigma_f = np.mean(np.array([s["sigma_f_hat"] for s in samples]), axis=0)
         sigma_M = np.mean(np.array([s["sigma_M_hat"] for s in samples]), axis=0)
 
+        # Recent instantaneous / 50ms window (last 25 samples) to capture fast-onset gusts
+        recent_samples = samples[-25:] if len(samples) >= 25 else samples
+        inst_sigma_f = np.mean(np.array([s["sigma_f_hat"] for s in recent_samples]), axis=0)
+
         return TelemetrySummary(
             timestamp=float(latest_time),
             window_duration_s=float(duration),
@@ -284,6 +309,7 @@ class System1System2Bridge:
             motor_saturation_pct=[float(x) for x in sat_pct],
             unmodeled_force_disturbance=[float(x) for x in sigma_f],
             unmodeled_moment_disturbance=[float(x) for x in sigma_M],
+            instantaneous_force_disturbance=[float(x) for x in inst_sigma_f],
         )
 
     def apply_system2_patch(self, patch: System2Patch) -> None:

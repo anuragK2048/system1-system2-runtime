@@ -122,7 +122,7 @@ class TestSystem1L1Adaptive(unittest.TestCase):
         llm_text = summary.format_llm_text()
         self.assertIn("LAST 0.2s TELEMETRY SUMMARY:", llm_text)
         self.assertIn("Position Error", llm_text)
-        self.assertIn("Physics Residual", llm_text)
+        self.assertIn("External Disturbance Force", llm_text)
 
     def test_fast_trigger_mechanism(self):
         """Verify Fast Trigger fires when thresholds are exceeded."""
