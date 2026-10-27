@@ -2,9 +2,23 @@
 
 import time
 from pathlib import Path
+import ctypes
 import mujoco
 import mujoco.viewer
 import numpy as np
+
+# macOS Shift key modifier detector via CoreGraphics
+try:
+    _core_graphics = ctypes.cdll.LoadLibrary('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
+    _core_graphics.CGEventSourceFlagsState.restype = ctypes.c_uint64
+    _core_graphics.CGEventSourceFlagsState.argtypes = [ctypes.c_int32]
+    def is_shift_down() -> bool:
+        # kCGEventSourceStateCombinedSessionState = 0, kCGEventFlagMaskShift = 0x00020000
+        return bool(_core_graphics.CGEventSourceFlagsState(0) & 0x00020000)
+except Exception:
+    def is_shift_down() -> bool:
+        return False
+
 
 # Path to the Skydio X2 scene
 SCENE_PATH = Path(__file__).resolve().parents[3] / "assets" / "skydio_x2" / "scene.xml"
@@ -25,62 +39,75 @@ active_chaos = {
     "motor_failure": False,    # Chaos 1: Motor 1 thrust cut by 60%
     "swinging_weight": False,  # Chaos 2: True physical swinging payload
     "sensor_noise": False,     # Chaos 3: IMU gyro sensor noise
-    "wind_gust": False,        # 3.5N Wind gust (external disturbance)
+    "wind_gust": False,        # 5.0N Wind gust (external disturbance)
 }
 gust_end_time = 0.0
+reset_requested = False
 
 def print_menu():
-    print("\n" + "=" * 68)
+    print("\n" + "=" * 70)
     print("🚁 SKYDIO X2 - INTERACTIVE MULTIBODY CHAOS TESTBED")
-    print("=" * 68)
+    print("=" * 70)
     print("Press the following keys inside the 3D Viewer window:")
-    print("  [1] 💥 CUT MOTOR 1 POWER BY 60%   (Chipped prop / thrust loss)")
-    print("  [2] 📦 ATTACH SWINGING WEIGHT     (0.35kg red ball on golden tether)")
-    print("  [3] ⚡ INJECT SENSOR NOISE        (High-freq gyro chatter)")
-    print("  [W] 💨 BLOW WIND GUST (3.5N)      (Healthy disturbance rejection)")
-    print("  [R] or [0] 🔄 RESET DRONE         (Clear all chaos & restore hover)")
-    print("  [Spacebar] ⏸  PAUSE / RESUME")
-    print("-" * 68)
+    print("  [Shift + 1] (or 6) 💥 CUT MOTOR 1 POWER BY 60%   (Chipped prop)")
+    print("  [Shift + 2] (or 7) 📦 ATTACH SWINGING WEIGHT     (0.35kg red ball)")
+    print("  [Shift + 3] (or 8) ⚡ INJECT SENSOR NOISE        (Gyro chatter)")
+    print("  [Shift + 4] (or 9) 💨 BLOW WIND GUST (5.0N)      (Disturbance)")
+    print("  [Shift + 5] (or 0) 🔄 RESET DRONE                (Restore stable hover)")
+    print("  [Spacebar]         ⏸  PAUSE / RESUME")
+    print("-" * 70)
+    print("🛡️  Anti-Collision Protection: Drone visibility locked permanently ON.")
     print("Camera: AUTO-TRACKING ENABLED (Drone will never leave screen)")
     print("  • 1-Finger Drag: Orbit around drone | 2-Finger Swipe: Zoom")
-    print("=" * 68 + "\n")
+    print("=" * 70 + "\n")
 
 def key_callback(keycode: int):
-    global active_chaos, gust_end_time
+    global active_chaos, gust_end_time, reset_requested
 
-    # Key '1' -> Motor 1 Failure
-    if keycode == 49:
+    shift = is_shift_down()
+
+    # Shift + 1 ('!' = 33, '1' with Shift = 49, or key '6' = 54) -> Motor 1 Failure
+    if keycode == 33 or (keycode == 49 and shift) or keycode == 54:
         active_chaos["motor_failure"] = not active_chaos["motor_failure"]
         status = "🔴 ACTIVE (Motor 1 at 40% power)" if active_chaos["motor_failure"] else "🟢 OFF (Full Power)"
         print(f"\n🚨 [CHAOS 1] Motor 1 Failure: {status}")
 
-    # Key '2' -> Physical Swinging Weight
-    elif keycode == 50:
+    # Shift + 2 ('@' = 64, '2' with Shift = 50, or key '7' = 55) -> Swinging Weight
+    elif keycode == 64 or (keycode == 50 and shift) or keycode == 55:
         active_chaos["swinging_weight"] = not active_chaos["swinging_weight"]
         if active_chaos["swinging_weight"]:
             print("\n🚨 [CHAOS 2] Swinging Weight: 🔴 ATTACHED! (Look directly under drone: red ball swinging!)")
         else:
             print("\n🚨 [CHAOS 2] Swinging Weight: 🟢 DETACHED (Weightless)")
 
-    # Key '3' -> Sensor Noise
-    elif keycode == 51:
+    # Shift + 3 ('#' = 35, '3' with Shift = 51, or key '8' = 56) -> Sensor Noise
+    elif keycode == 35 or (keycode == 51 and shift) or keycode == 56:
         active_chaos["sensor_noise"] = not active_chaos["sensor_noise"]
         status = "🔴 ACTIVE (IMU vibrating with noise)" if active_chaos["sensor_noise"] else "🟢 OFF (Clean sensors)"
         print(f"\n🚨 [CHAOS 3] Sensor Noise: {status}")
 
-    # Key 'W' -> Wind Gust
-    elif keycode in (87, 119):
+    # Shift + 4 ('$' = 36, '4' with Shift = 52, or key '9' = 57) -> Wind Gust
+    elif keycode == 36 or (keycode == 52 and shift) or keycode == 57:
         active_chaos["wind_gust"] = True
-        gust_end_time = time.time() + 0.20
-        print("\n💨 [DISTURBANCE] 3.5N Wind Gust hit the drone! (Notice how standard PID handles this easily)")
+        gust_end_time = time.time() + 0.80
+        print("\n💨 [DISTURBANCE] 5.0N Wind Gust hit the drone! (Notice how standard PID tilts to fight it and recovers)")
 
-    # Key 'R' or '0' -> Reset
-    elif keycode in (82, 114, 48):
+    # Shift + 5 ('%' = 37, '5' with Shift = 53, key '0' = 48, or Shift+R / 'R') -> Reset Drone
+    elif keycode == 37 or (keycode in (53, 48, 82, 114) and shift) or keycode == 48:
         for k in active_chaos:
             active_chaos[k] = False
+        reset_requested = True
         print("\n🔄 [RESET] All chaos modes CLEARED! Restoring drone to level hover.")
 
+    # Plain number press (1, 2, 3, 4, 5 without Shift) reminder
+    elif keycode in (49, 50, 51, 52, 53) and not shift:
+        num = keycode - 48
+        alt_key = num + 5
+        print(f"\n💡 [TIP] Hold Shift! Press [Shift + {num}] (or single key [{alt_key}]) to trigger Chaos {num}.")
+
 def run_simulation():
+    global reset_requested
+
     if not SCENE_PATH.exists():
         raise FileNotFoundError(f"Model file not found at: {SCENE_PATH}")
 
@@ -125,7 +152,6 @@ def run_simulation():
         viewer.cam.azimuth = 45
 
         last_print = time.time()
-        last_reset_check = False
         physics_step_dt = model.opt.timestep
         render_interval = 1.0 / 60.0
         last_render = time.time()
@@ -135,12 +161,10 @@ def run_simulation():
             step_start = time.time()
             now = time.time()
 
-            # Handle reset action
-            if not any(active_chaos.values()) and last_reset_check:
+            # Handle explicit reset action from user
+            if reset_requested:
                 reset_simulation()
-                last_reset_check = False
-            if any(active_chaos.values()):
-                last_reset_check = True
+                reset_requested = False
 
             # ----------------- PHYSICAL PAYLOAD HOOK / UNHOOK -----------------
             if active_chaos["swinging_weight"]:
@@ -167,13 +191,14 @@ def run_simulation():
                 data.qpos[7:9] = 0.0
                 data.qvel[6:8] = 0.0
 
-            # Clear external disturbance forces
+            # Clear external disturbance forces on drone
+            data.xfrc_applied[drone_body_id, :] = 0.0
             data.qfrc_applied[:] = 0.0
 
-            # 1. External Wind Gust
+            # 1. External Wind Gust (5.0N lateral force on drone body for 0.8s)
             if active_chaos["wind_gust"]:
                 if now < gust_end_time:
-                    data.qfrc_applied[0] = 3.5  # 3.5N lateral push on drone
+                    data.xfrc_applied[drone_body_id, 0] = 5.0  # 5.0N push in +X
                 else:
                     active_chaos["wind_gust"] = False
 
@@ -216,6 +241,8 @@ def run_simulation():
 
             # Sync GUI at 60 FPS
             if now - last_render >= render_interval:
+                # Keep geom groups 0, 1, 2 permanently visible so drone never vanishes
+                viewer.opt.geomgroup[0:3] = 1
                 viewer.sync()
                 last_render = now
 
@@ -228,7 +255,7 @@ def run_simulation():
 
                 # Detect crash
                 if z < 0.12 and any(active_chaos.values()):
-                    print(f"💥 [CRASH] Drone crashed on the ground! (Alt={z:.2f}m, Roll={roll_deg:+.1f}°). Press 'R' to reset.")
+                    print(f"💥 [CRASH] Drone crashed on the ground! (Alt={z:.2f}m, Roll={roll_deg:+.1f}°). Press [Shift+5] to reset.")
                 elif active_chaos["swinging_weight"]:
                     sw_x = np.degrees(data.qpos[7])
                     sw_y = np.degrees(data.qpos[8])
