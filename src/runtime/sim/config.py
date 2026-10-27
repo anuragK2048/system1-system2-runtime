@@ -102,6 +102,46 @@ class PIDConfig:
 
 
 # ==============================================================================
+# SYSTEM 1 (L1 ADAPTIVE + GEOMETRIC) CONTROLLER CONFIGURATION
+# ==============================================================================
+@dataclass
+class L1Config:
+    """Parameters for SE(3) Geometric Controller and L1 Adaptive Augmentation.
+
+    Based on 'L1Quad: L1 Adaptive Augmentation of Geometric Control for Agile Quadrotors
+    With Performance Guarantees' (IEEE Transactions on Control Systems Technology, 2025).
+    """
+    # Geometric Baseline Controller gains
+    # k_p: Position gains [x, y, z]
+    pos_gains: np.ndarray = field(default_factory=lambda: np.array([3.0, 3.0, 15.0], dtype=np.float32))
+    # k_v: Velocity gains [x, y, z]
+    vel_gains: np.ndarray = field(default_factory=lambda: np.array([2.5, 2.5, 8.0], dtype=np.float32))
+    # k_R: Attitude gains [roll, pitch, yaw]
+    att_gains: np.ndarray = field(default_factory=lambda: np.array([3.5, 3.5, 1.2], dtype=np.float32))
+    # k_W: Angular velocity gains [roll_rate, pitch_rate, yaw_rate]
+    ang_gains: np.ndarray = field(default_factory=lambda: np.array([0.7, 0.7, 0.25], dtype=np.float32))
+
+    # L1 Adaptive Augmentation parameters
+    # As_v: Velocity adaptation Hurwitz gain (strictly negative)
+    as_v: float = -5.0
+    # As_W: Angular velocity adaptation Hurwitz gain (strictly negative)
+    as_w: float = -20.0
+    # Cutoff frequencies for low-pass filters (Hz)
+    lpf1_cutoff_freq_force: float = 10.0
+    lpf1_cutoff_freq_moment: float = 10.0
+    lpf2_cutoff_freq_moment: float = 5.0
+    # Scaling factor for horizontal velocity estimation error
+    vtilde_xy_scale: float = 1.0
+
+    # Fast Trigger limits (detecting when to alert System 2)
+    pos_error_threshold: float = 0.30        # meters
+    tilt_error_threshold_deg: float = 25.0   # degrees
+    gyro_rms_threshold: float = 3.5          # rad/s
+    force_disturbance_threshold: float = 3.0 # Newtons
+
+
+
+# ==============================================================================
 # CHAOS INJECTION & FAILURE MODE SETTINGS
 # ==============================================================================
 @dataclass
