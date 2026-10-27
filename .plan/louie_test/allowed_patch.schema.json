@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "allowed_patch.schema.json",
+  "title": "DronePatch",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["failure_type", "patch"],
+  "properties": {
+    "failure_type": {
+      "type": "string",
+      "enum": ["chipped_prop", "swinging_payload", "noisy_sensor", "unknown"]
+    },
+    "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+    "patch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["motor_trim", "kp_rp_scale", "kd_rp_scale", "kp_alt_scale", "kd_alt_scale", "kp_yaw_scale", "kd_yaw_scale", "imu_filter_alpha"],
+      "properties": {
+        "motor_trim": {
+          "type": "array", "minItems": 4, "maxItems": 4,
+          "items": {"type": "number", "minimum": 0.70, "maximum": 1.70},
+          "description": "[FL, FR, RR, RL] multiplier per motor. 1.0 = healthy."
+        },
+        "kp_rp_scale":  {"type": "number", "minimum": 0.35, "maximum": 1.30},
+        "kd_rp_scale":  {"type": "number", "minimum": 0.35, "maximum": 1.50},
+        "kp_yaw_scale": {"type": "number", "minimum": 0.50, "maximum": 1.30},
+        "kd_yaw_scale": {"type": "number", "minimum": 0.50, "maximum": 1.50},
+        "kp_alt_scale": {"type": "number", "minimum": 0.70, "maximum": 1.40},
+        "kd_alt_scale": {"type": "number", "minimum": 0.70, "maximum": 1.40},
+        "imu_filter_alpha": {"type": "number", "minimum": 0.05, "maximum": 1.0,
+          "description": "1.0 = no filtering, 0.1 = heavy filtering"}
+      }
+    }
+  }
+}
