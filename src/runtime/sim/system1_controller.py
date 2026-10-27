@@ -60,6 +60,7 @@ class System1Controller:
         pid_cfg: Optional[PIDConfig] = None,
         bridge: Optional[System1System2Bridge] = None,
         mode: str = "l1_adaptive",
+        target_pos: Optional[np.ndarray] = None,
     ) -> None:
         self.drone_cfg = drone_cfg or DroneConfig()
         self.l1_cfg = l1_cfg or L1Config()
@@ -71,6 +72,11 @@ class System1Controller:
             force_residual_threshold=self.l1_cfg.force_disturbance_threshold,
         )
         self.mode = mode
+        self.target_pos = (
+            np.array(target_pos, dtype=np.float32)
+            if target_pos is not None
+            else np.array([0.0, 0.0, self.drone_cfg.target_z], dtype=np.float32)
+        )
 
         # Physical constants
         self.mass = 1.325  # kg
@@ -101,6 +107,7 @@ class System1Controller:
         motor_trim: Optional[np.ndarray] = None,
         sim_time: float = 0.0,
         dt: float = 0.002,
+        target_pos: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, dict]:
         """Calculates 4 motor thrust commands from current drone state at 500 Hz.
 
@@ -113,6 +120,7 @@ class System1Controller:
             motor_trim: Optional explicit [s1, s2, s3, s4] per-motor scaling.
             sim_time: Current simulation timestamp in seconds.
             dt: Simulation timestep (default 0.002s = 500 Hz).
+            target_pos: Optional [x, y, z] position setpoint (defaults to self.target_pos).
 
         Returns:
             Tuple of:
@@ -122,11 +130,11 @@ class System1Controller:
         """
         if self.mode == "pid":
             return self._compute_pid_thrusts(
-                pos, vel, quat, omega, feedforward_force, motor_trim, sim_time
+                pos, vel, quat, omega, feedforward_force, motor_trim, sim_time, target_pos
             )
 
         return self._compute_l1_thrusts(
-            pos, vel, quat, omega, feedforward_force, motor_trim, sim_time, dt
+            pos, vel, quat, omega, feedforward_force, motor_trim, sim_time, dt, target_pos
         )
 
     def _compute_l1_thrusts(
@@ -139,6 +147,7 @@ class System1Controller:
         motor_trim: Optional[np.ndarray],
         sim_time: float,
         dt: float,
+        target_pos: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, dict]:
         """Core L1 Adaptive + Geometric controller execution."""
         # ----------------------------------------------------------------------
@@ -168,10 +177,9 @@ class System1Controller:
             att_kd_mult = active_patch.gain_multipliers.att_kd
 
         # Target setpoint in MuJoCo frame
-        target_z = self.drone_cfg.target_z
-        target_pos = np.array([0.0, 0.0, target_z], dtype=np.float32)
+        current_target_pos = (target_pos if target_pos is not None else self.target_pos).copy()
         if active_patch and active_patch.safety_envelope and active_patch.safety_envelope.temp_setpoint_offset:
-            target_pos += np.array(active_patch.safety_envelope.temp_setpoint_offset, dtype=np.float32)
+            current_target_pos += np.array(active_patch.safety_envelope.temp_setpoint_offset, dtype=np.float32)
 
         # ----------------------------------------------------------------------
         # 2. Coordinate Transformation (MuJoCo ENU/NWU -> Mini-QuadLib NED)
@@ -179,7 +187,7 @@ class System1Controller:
         pos_ned = self._T @ pos
         vel_ned = self._T @ vel
         omega_ned = self._T @ omega
-        desired_pos_ned = self._T @ target_pos
+        desired_pos_ned = self._T @ current_target_pos
 
         # Compute rotation matrix in MuJoCo from quaternion [w, x, y, z]
         w, qx, qy, qz = quat
@@ -291,7 +299,7 @@ class System1Controller:
             quat=quat,
             omega=omega,
             motor_ctrl=motor_thrusts,
-            target_pos=target_pos,
+            target_pos=current_target_pos,
             sigma_f_hat=sigma_f_hat_mujoco,
             sigma_M_hat=sigma_M_hat_mujoco,
         )
@@ -320,7 +328,7 @@ class System1Controller:
             "euler_deg": [roll_deg, pitch_deg, yaw_deg],
             "is_triggered": is_triggered,
             "trigger_reasons": trigger_reasons,
-            "pos_error": [float(x) for x in (target_pos - pos)],
+            "pos_error": [float(x) for x in (current_target_pos - pos)],
         }
 
         return motor_thrusts, diagnostics
@@ -334,27 +342,73 @@ class System1Controller:
         feedforward_force: Optional[np.ndarray],
         motor_trim: Optional[np.ndarray],
         sim_time: float,
+        target_pos: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, dict]:
-        """Legacy PID reflex controller fallback."""
+        """PID reflex controller with optional System 2 patch adaptation."""
         x, y, z = pos
         vx, vy, vz = vel
 
-        # Altitude
-        alt_error = self.drone_cfg.target_z - z
-        F_z = self.drone_cfg.total_hover_weight + self.pid_cfg.kp_z * alt_error - self.pid_cfg.kd_z * vz
-        if feedforward_force is not None:
-            F_z += feedforward_force[2]
+        # Check for Active System 2 Patch from Async Bridge
+        active_patch = self.bridge.get_active_patch()
 
-        # Horizontal Position Hold
+        # Extract feedforward force offset [Fx, Fy, Fz]
+        active_ff = feedforward_force
+        if active_ff is None and active_patch and active_patch.feedforward_force_offset:
+            active_ff = np.array(active_patch.feedforward_force_offset, dtype=np.float32)
+
+        # Extract motor trim [s1, s2, s3, s4]
+        active_trim = motor_trim
+        if active_trim is None and active_patch and active_patch.motor_trim_scale:
+            active_trim = np.array(active_patch.motor_trim_scale, dtype=np.float32)
+
+        # Extract gain multipliers
+        pos_kp_mult = 1.0
+        pos_kd_mult = 1.0
+        att_kp_mult = 1.0
+        att_kd_mult = 1.0
+        if active_patch and active_patch.gain_multipliers:
+            pos_kp_mult = active_patch.gain_multipliers.pos_kp
+            pos_kd_mult = active_patch.gain_multipliers.pos_kd
+            att_kp_mult = active_patch.gain_multipliers.att_kp
+            att_kd_mult = active_patch.gain_multipliers.att_kd
+
+        # Target setpoint in MuJoCo frame
+        current_target_pos = (target_pos if target_pos is not None else self.target_pos).copy()
+        if active_patch and active_patch.safety_envelope and active_patch.safety_envelope.temp_setpoint_offset:
+            current_target_pos += np.array(active_patch.safety_envelope.temp_setpoint_offset, dtype=np.float32)
+
+        # Compute position error relative to setpoint
+        err_x = x - current_target_pos[0]
+        err_y = y - current_target_pos[1]
+        alt_error = current_target_pos[2] - z
+
+        # Altitude demand (collective thrust F_z)
+        F_z = self.drone_cfg.total_hover_weight + (self.pid_cfg.kp_z * pos_kp_mult) * alt_error - (self.pid_cfg.kd_z * pos_kd_mult) * vz
+        if active_ff is not None:
+            F_z += active_ff[2]
+
+        # Horizontal Position Hold with feedforward tilt bias
+        ff_pitch = 0.0
+        ff_roll = 0.0
+        if active_ff is not None:
+            # -Fx requires negative pitch (nose down / forward acceleration)
+            ff_pitch = -active_ff[0] / self.drone_cfg.total_hover_weight
+            # +Fy requires positive roll (right acceleration in NWU)
+            ff_roll = active_ff[1] / self.drone_cfg.total_hover_weight
+
+        max_tilt = self.pid_cfg.max_tilt_rad
+        if active_patch and active_patch.safety_envelope and active_patch.safety_envelope.max_tilt_deg:
+            max_tilt = np.radians(active_patch.safety_envelope.max_tilt_deg)
+
         target_pitch = np.clip(
-            -self.pid_cfg.kp_xy * x - self.pid_cfg.kd_xy * vx,
-            -self.pid_cfg.max_tilt_rad,
-            self.pid_cfg.max_tilt_rad,
+            -(self.pid_cfg.kp_xy * pos_kp_mult) * err_x - (self.pid_cfg.kd_xy * pos_kd_mult) * vx + ff_pitch,
+            -max_tilt,
+            max_tilt,
         )
         target_roll = np.clip(
-            self.pid_cfg.kp_xy * y + self.pid_cfg.kd_xy * vy,
-            -self.pid_cfg.max_tilt_rad,
-            self.pid_cfg.max_tilt_rad,
+            (self.pid_cfg.kp_xy * pos_kp_mult) * err_y + (self.pid_cfg.kd_xy * pos_kd_mult) * vy + ff_roll,
+            -max_tilt,
+            max_tilt,
         )
 
         # Attitude & Heading
@@ -362,15 +416,15 @@ class System1Controller:
         pitch_err = target_pitch - (2.0 * quat[2])
         yaw_err = 0.0 - (2.0 * quat[3])
 
-        tau_x = self.pid_cfg.kp_att * roll_err - self.pid_cfg.kd_att * omega[0]
-        tau_y = self.pid_cfg.kp_att * pitch_err - self.pid_cfg.kd_att * omega[1]
+        tau_x = (self.pid_cfg.kp_att * att_kp_mult) * roll_err - (self.pid_cfg.kd_att * att_kd_mult) * omega[0]
+        tau_y = (self.pid_cfg.kp_att * att_kp_mult) * pitch_err - (self.pid_cfg.kd_att * att_kd_mult) * omega[1]
         tau_z = self.pid_cfg.kp_yaw * yaw_err - self.pid_cfg.kd_yaw * omega[2]
 
         demands = np.array([F_z, tau_x, tau_y, tau_z])
         motor_thrusts = self.B_INV @ demands
 
-        if motor_trim is not None:
-            motor_thrusts = motor_thrusts * motor_trim
+        if active_trim is not None:
+            motor_thrusts = motor_thrusts * active_trim
 
         motor_thrusts = np.clip(
             motor_thrusts,
@@ -378,15 +432,14 @@ class System1Controller:
             self.drone_cfg.max_thrust,
         )
 
-        target_pos = np.array([0.0, 0.0, self.drone_cfg.target_z])
-        self.bridge.push_telemetry(
+        is_triggered, trigger_reasons = self.bridge.push_telemetry(
             sim_time=sim_time,
             pos=pos,
             vel=vel,
             quat=quat,
             omega=omega,
             motor_ctrl=motor_thrusts,
-            target_pos=target_pos,
+            target_pos=current_target_pos,
             sigma_f_hat=np.zeros(3),
             sigma_M_hat=np.zeros(3),
         )
@@ -404,8 +457,8 @@ class System1Controller:
             "u_ad": [0.0, 0.0, 0.0, 0.0],
             "sigma_f_hat": [0.0, 0.0, 0.0],
             "sigma_M_hat": [0.0, 0.0, 0.0],
-            "is_triggered": False,
-            "trigger_reasons": [],
-            "pos_error": [float(x) for x in (target_pos - pos)],
+            "is_triggered": is_triggered,
+            "trigger_reasons": trigger_reasons,
+            "pos_error": [float(val) for val in (current_target_pos - pos)],
         }
         return motor_thrusts, diagnostics

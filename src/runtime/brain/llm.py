@@ -105,30 +105,79 @@ def _extract_json_patch(text: str) -> Optional[dict]:
 
 
 class System2Brain:
-    """LLM client interface for generating System 2 control patches."""
+    """Pluggable LLM client interface for generating System 2 control patches.
+
+    Supported providers:
+      - 'groq': Ultra-fast Groq Cloud (~1.0s latency, default model: 'openai/gpt-oss-120b')
+      - 'baseten': Baseten endpoint (default model: 'meta-models/muse-spark-open-1026')
+      - 'openai': OpenAI or custom OpenAI-compatible endpoint
+    """
 
     def __init__(
         self,
+        provider: Optional[str] = None,
         api_key: Optional[str] = None,
-        base_url: str = "https://inference.baseten.co/v1",
-        model: str = "meta-models/muse-spark-open-1026",
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
         logger: Optional[LLMLogger] = None,
     ) -> None:
-        self.api_key = api_key or os.getenv("BASETEN_API_KEY")
-        self.base_url = base_url
-        self.model = model
-        self.logger = logger or get_llm_logger()
+        # Determine provider: parameter -> LLM_PROVIDER env -> auto-detect -> default 'groq'
+        env_provider = os.getenv("LLM_PROVIDER")
+        self.provider = (provider or env_provider or "").lower().strip()
+        if not self.provider:
+            if os.getenv("GROQ_API_KEY"):
+                self.provider = "groq"
+            elif os.getenv("BASETEN_API_KEY"):
+                self.provider = "baseten"
+            else:
+                self.provider = "groq"
 
-        if not self.api_key:
-            raise ValueError(
-                "BASETEN_API_KEY not found in environment or .env file! "
-                "Please configure BASETEN_API_KEY to enable System 2 LLM reasoning."
+        self.logger = logger or get_llm_logger()
+        self.base_url = base_url
+
+        if self.provider == "groq":
+            self.api_key = api_key or os.getenv("GROQ_API_KEY")
+            if not self.api_key:
+                raise ValueError(
+                    "GROQ_API_KEY not found in environment or .env file! "
+                    "Please configure GROQ_API_KEY to enable System 2 LLM reasoning."
+                )
+            self.model = model or os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+            from groq import Groq
+            self.client = Groq(api_key=self.api_key)
+
+        elif self.provider == "baseten":
+            self.api_key = api_key or os.getenv("BASETEN_API_KEY")
+            if not self.api_key:
+                raise ValueError(
+                    "BASETEN_API_KEY not found in environment or .env file! "
+                    "Please configure BASETEN_API_KEY to enable System 2 LLM reasoning."
+                )
+            self.base_url = self.base_url or os.getenv(
+                "BASETEN_BASE_URL", "https://inference.baseten.co/v1"
+            )
+            self.model = model or os.getenv("BASETEN_MODEL", "meta-models/muse-spark-open-1026")
+            self.client = OpenAI(
+                base_url=self.base_url,
+                api_key=self.api_key,
             )
 
-        self.client = OpenAI(
-            base_url=self.base_url,
-            api_key=self.api_key,
-        )
+        elif self.provider == "openai":
+            self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+            if not self.api_key:
+                raise ValueError("OPENAI_API_KEY not found in environment or .env file!")
+            self.base_url = self.base_url or os.getenv("OPENAI_BASE_URL")
+            self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+            kwargs = {"api_key": self.api_key}
+            if self.base_url:
+                kwargs["base_url"] = self.base_url
+            self.client = OpenAI(**kwargs)
+
+        else:
+            raise ValueError(
+                f"Unsupported LLM provider '{self.provider}'. "
+                f"Supported providers: 'groq', 'baseten', 'openai'."
+            )
 
     def analyze_and_patch(
         self,
@@ -156,15 +205,20 @@ class System2Brain:
         reasoning = None
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
+            call_kwargs = {
+                "model": self.model,
+                "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
                 ],
-                temperature=0.2,
-                max_tokens=4096,
-            )
+                "temperature": 0.2,
+            }
+            if self.provider == "groq":
+                call_kwargs["max_completion_tokens"] = 2048
+            else:
+                call_kwargs["max_tokens"] = 4096
+
+            response = self.client.chat.completions.create(**call_kwargs)
             elapsed_s = time.time() - start_t
 
             # Extract token usage if returned by endpoint
@@ -185,17 +239,20 @@ class System2Brain:
                 data = _extract_json_patch(reasoning)
 
             if not data:
+                finish_reason = getattr(response.choices[0], "finish_reason", "unknown")
                 raise ValueError(
-                    f"Model returned invalid or empty JSON payload (finish_reason: {response.choices[0].finish_reason})"
+                    f"Model returned invalid or empty JSON payload (finish_reason: {finish_reason})"
                 )
 
             data["timestamp"] = time.time()
             patch = System2Patch.from_dict(data)
 
+            finish_reason = getattr(response.choices[0], "finish_reason", "unknown")
+
             # Log successful transaction
             self.logger.log_call(
                 duration_s=elapsed_s,
-                model=self.model,
+                model=f"{self.provider}:{self.model}",
                 system_prompt=SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 raw_output=raw_text,
@@ -206,7 +263,11 @@ class System2Brain:
                 reasoning_content=reasoning,
                 parsed_patch=patch.to_dict(),
                 status="success",
-                metadata={"trigger_header": trigger_header, "finish_reason": response.choices[0].finish_reason},
+                metadata={
+                    "provider": self.provider,
+                    "trigger_header": trigger_header,
+                    "finish_reason": finish_reason,
+                },
             )
 
             self._print_reasoning_banner(
@@ -216,12 +277,12 @@ class System2Brain:
 
         except Exception as e:
             elapsed_s = time.time() - start_t
-            print(f"⚠️ [SYSTEM 2 LLM ERROR] Failed to generate control patch: {e}")
+            print(f"⚠️ [SYSTEM 2 LLM ERROR - {self.provider.upper()}] Failed to generate control patch: {e}")
 
             # Log failed transaction
             self.logger.log_call(
                 duration_s=elapsed_s,
-                model=self.model,
+                model=f"{self.provider}:{self.model}",
                 system_prompt=SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 raw_output=raw_text,
@@ -233,7 +294,7 @@ class System2Brain:
                 parsed_patch=None,
                 status="error",
                 error_message=str(e),
-                metadata={"trigger_header": trigger_header},
+                metadata={"provider": self.provider, "trigger_header": trigger_header},
             )
             return None
 
@@ -248,7 +309,7 @@ class System2Brain:
     ) -> None:
         """Prints a human-readable banner summarizing LLM reasoning and applied levers."""
         print("\n" + "═" * 74)
-        print(f"🧠 [SYSTEM 2 LLM META-CONTROLLER] Reasoning Complete in {elapsed_s:.2f}s")
+        print(f"🧠 [SYSTEM 2 LLM META-CONTROLLER - {self.provider.upper()}: {self.model}] Reasoning Complete in {elapsed_s:.2f}s")
         print(f"📊 Tokens: Input={prompt_tokens} | Output={completion_tokens} | Total={total_tokens}")
         print("═" * 74)
         if trigger_header:
@@ -286,11 +347,15 @@ class System2Worker:
         self,
         bridge: System1System2Bridge,
         brain: Optional[System2Brain] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
         cooldown_s: float = 2.0,
+        drone_name: str = "Drone",
     ) -> None:
         self.bridge = bridge
-        self.brain = brain or System2Brain()
+        self.brain = brain or System2Brain(provider=provider, model=model)
         self.cooldown_s = cooldown_s
+        self.drone_name = drone_name
 
         self._running = False
         self._thread: Optional[threading.Thread] = None
@@ -301,9 +366,10 @@ class System2Worker:
         if self._running:
             return
         self._running = True
-        self._thread = threading.Thread(target=self._run_loop, name="System2WorkerThread", daemon=True)
+        thread_name = f"System2Worker_{self.drone_name.replace(' ', '_')}"
+        self._thread = threading.Thread(target=self._run_loop, name=thread_name, daemon=True)
         self._thread.start()
-        print("🚀 [SYSTEM 2] Async Meta-Controller thread started. Monitoring System 1 bridge...")
+        print(f"🚀 [SYSTEM 2 - {self.drone_name.upper()}] Async Meta-Controller thread started. Monitoring System 1 bridge...")
 
     def stop(self) -> None:
         """Stops the System 2 background thread."""
@@ -311,7 +377,7 @@ class System2Worker:
         if self._thread:
             self._thread.join(timeout=1.0)
             self._thread = None
-        print("🛑 [SYSTEM 2] Async Meta-Controller stopped.")
+        print(f"🛑 [SYSTEM 2 - {self.drone_name.upper()}] Async Meta-Controller stopped.")
 
     def _run_loop(self) -> None:
         """Main loop executed in background thread."""
@@ -360,14 +426,14 @@ class System2Worker:
                             self.bridge.apply_system2_patch(patch)
                             self._patch_applied_time = now
                             self._patch_notified_stable = False
-                            print(f"\n✨ [SYSTEM 2] Applied Control Patch to System 1:")
+                            print(f"\n✨ [SYSTEM 2 - {self.drone_name.upper()}] Applied Control Patch to System 1:")
                             print(f"   Diagnosis: {patch.diagnosis}")
                             if patch.feedforward_force_offset and any(abs(x) > 0.01 for x in patch.feedforward_force_offset):
-                                print(f"   Feedforward Force: {patch.feedforward_force_offset} N")
+                                 print(f"   Feedforward Force: {patch.feedforward_force_offset} N")
                             if patch.motor_trim_scale:
-                                print(f"   Motor Trim: {patch.motor_trim_scale}")
+                                 print(f"   Motor Trim: {patch.motor_trim_scale}")
                             if patch.gain_multipliers:
-                                print(f"   Gain Multipliers: {patch.gain_multipliers}\n")
+                                 print(f"   Gain Multipliers: {patch.gain_multipliers}\n")
 
                 else:
                     # --------------------------------------------------------------
@@ -386,14 +452,14 @@ class System2Worker:
                     if calm_hover:
                         if (now - self._last_call_time) > 2.5:
                             self.bridge.clear_active_patch()
-                            print("\n🟢 [SYSTEM 2] Disturbance ended & flight nominal. Resetting System 1 control law to baseline.\n")
+                            print(f"\n🟢 [SYSTEM 2 - {self.drone_name.upper()}] Disturbance ended & flight nominal. Resetting System 1 control law to baseline.\n")
                             self._last_call_time = now
                             self._patch_notified_stable = False
                     else:
                         # Disturbance is still active. Is the active patch holding flight stable?
                         is_stable = (pos_err_norm < 0.30) and not summary.oscillation_detected
                         if is_stable and not getattr(self, "_patch_notified_stable", False):
-                            print("🎯 [SYSTEM 2] Active control patch holding flight stable against disturbance. Monitoring...\n")
+                            print(f"🎯 [SYSTEM 2 - {self.drone_name.upper()}] Active control patch holding flight stable against disturbance. Monitoring...\n")
                             self._patch_notified_stable = True
 
                         # Only re-consult LLM if drone severely diverges or oscillates after 6.0 seconds
@@ -401,19 +467,19 @@ class System2Worker:
                         severe_divergence = (pos_err_norm > 0.75) or (summary.oscillation_detected and patch_age > 4.0)
 
                         if severe_divergence and patch_age > 6.0:
-                            print("⚠️ [SYSTEM 2] Active patch insufficient; re-consulting LLM to revise control law...")
+                            print(f"⚠️ [SYSTEM 2 - {self.drone_name.upper()}] Active patch insufficient; re-consulting LLM to revise control law...")
                             trigger_event = self.bridge.get_latest_trigger_event(max_age_s=2.0, current_time=summary.timestamp)
                             self._last_call_time = now
                             revised_patch = self.brain.analyze_and_patch(summary, trigger_event)
                             if revised_patch:
                                 self.bridge.apply_system2_patch(revised_patch)
                                 self._patch_applied_time = now
-                                print(f"\n🔄 [SYSTEM 2] Revised Control Patch:")
+                                print(f"\n🔄 [SYSTEM 2 - {self.drone_name.upper()}] Revised Control Patch:")
                                 print(f"   Diagnosis: {revised_patch.diagnosis}\n")
 
             except Exception as e:
                 import traceback
-                print(f"⚠️ [SYSTEM 2 WORKER ERROR] {e}")
+                print(f"⚠️ [SYSTEM 2 - {self.drone_name.upper()} WORKER ERROR] {e}")
                 traceback.print_exc()
 
             time.sleep(0.05)
