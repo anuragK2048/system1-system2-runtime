@@ -18,6 +18,8 @@ import numpy as np
 SIM_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCENE_PATH = PROJECT_ROOT / "assets" / "skydio_x2" / "scene.xml"
+DUAL_SCENE_PATH = PROJECT_ROOT / "assets" / "skydio_x2" / "dual_scene.xml"
+
 
 
 # ==============================================================================

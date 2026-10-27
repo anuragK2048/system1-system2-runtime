@@ -63,14 +63,32 @@
 
 ## Quickstart
 
-### Run the 3D Interactive Simulation
+### Run the 3D Single-Drone Simulation
 ```bash
 uv run mjpython src/runtime/sim/view_drone.py
 ```
 
-### Run Controller & Bridge Tests
+### Run the 3D Dual-Drone Side-by-Side Comparison
 ```bash
-uv run python tests/test_system1_l1.py
+# Recommended default (PID Baseline vs. L1 Adaptive + System 2 LLM):
+uv run mjpython src/runtime/sim/view_dual_drone.py
+
+# Using Quick Presets:
+uv run mjpython src/runtime/sim/view_dual_drone.py --preset 1   # PID vs. L1 Adaptive (Reflex Comparison)
+uv run mjpython src/runtime/sim/view_dual_drone.py --preset 2   # L1 Adaptive vs. L1 Adaptive + System 2 LLM
+uv run mjpython src/runtime/sim/view_dual_drone.py --preset 3   # PID vs. L1 Adaptive + System 2 LLM
+uv run mjpython src/runtime/sim/view_dual_drone.py --preset 4   # PID vs. PID + System 2 LLM
+
+# Fully Custom Comparison:
+uv run mjpython src/runtime/sim/view_dual_drone.py --drone1 pid --drone2 l1_adaptive+system2
+
+# Interactive Selector Menu:
+uv run mjpython src/runtime/sim/view_dual_drone.py --interactive
+```
+
+### Run Controller, Bridge & Dual-Drone Tests
+```bash
+uv run python -m unittest discover tests
 ```
 
 ### Interactive Chaos Hotkeys (Inside 3D Viewer)

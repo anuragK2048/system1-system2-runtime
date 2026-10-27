@@ -170,7 +170,9 @@ class ChaosManager:
         payload_body_id: int,
         tether_geom_id: int,
         bob_geom_id: int,
-        payload_mass: float
+        payload_mass: float,
+        qpos_adr: int = 7,
+        qvel_adr: int = 6,
     ) -> None:
         """Simulates physical coupling or unhooking of the swinging cargo.
 
@@ -184,12 +186,15 @@ class ChaosManager:
           - Applies an exact upward counter-force (mp * 9.81) to neutralize its mass.
           - Resets swing angles to zero.
         """
+        if not hasattr(self, "_kicked_payloads"):
+            self._kicked_payloads = set()
+
         if self.active_chaos["swinging_weight"]:
             # Newly attached: impart an initial swing angle and velocity
-            if not self._was_payload_active:
-                data.qpos[7] = self.cfg.payload_kick_angle_rad  # ~17 degrees
-                data.qvel[6] = self.cfg.payload_kick_velocity   # 1.5 rad/s
-                self._was_payload_active = True
+            if payload_body_id not in self._kicked_payloads:
+                data.qpos[qpos_adr] = self.cfg.payload_kick_angle_rad  # ~17 degrees
+                data.qvel[qvel_adr] = self.cfg.payload_kick_velocity   # 1.5 rad/s
+                self._kicked_payloads.add(payload_body_id)
 
             # Make tether (gold) and bob (red) visible
             model.geom_rgba[tether_geom_id] = [1.0, 0.85, 0.10, 1.0]
@@ -198,7 +203,7 @@ class ChaosManager:
             # Clear counter-force so full gravity pulls down on the drone
             data.xfrc_applied[payload_body_id, :] = 0.0
         else:
-            self._was_payload_active = False
+            self._kicked_payloads.discard(payload_body_id)
 
             # Make tether and bob invisible
             model.geom_rgba[tether_geom_id] = [1.0, 0.85, 0.10, 0.0]
@@ -206,8 +211,8 @@ class ChaosManager:
 
             # Neutralize payload weight so the drone feels exactly 0.00 kg
             data.xfrc_applied[payload_body_id, 2] = payload_mass * 9.81
-            data.qpos[7:9] = 0.0
-            data.qvel[6:8] = 0.0
+            data.qpos[qpos_adr : qpos_adr + 2] = 0.0
+            data.qvel[qvel_adr : qvel_adr + 2] = 0.0
 
     def apply_wind_gust(
         self,

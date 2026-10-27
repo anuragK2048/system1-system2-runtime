@@ -181,6 +181,24 @@ class TestSystem1L1Adaptive(unittest.TestCase):
         self.assertIn("sigma_f_hat", diag)
         self.assertIn("sigma_M_hat", diag)
 
+    def test_brain_provider_selection(self):
+        """Verify System2Brain supports both Groq and Baseten provider configurations."""
+        from runtime.brain.llm import System2Brain
+
+        # Groq provider
+        brain_groq = System2Brain(provider="groq")
+        self.assertEqual(brain_groq.provider, "groq")
+        self.assertIn("gpt-oss", brain_groq.model)
+
+        # Baseten provider
+        brain_baseten = System2Brain(provider="baseten")
+        self.assertEqual(brain_baseten.provider, "baseten")
+        self.assertIn("muse-spark", brain_baseten.model)
+
+        # Unsupported provider raises ValueError
+        with self.assertRaises(ValueError):
+            System2Brain(provider="unsupported_provider")
+
 
 if __name__ == "__main__":
     unittest.main()
