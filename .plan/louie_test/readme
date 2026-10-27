@@ -1,0 +1,6 @@
+skydio_hover.py	JOB: Skydio X2 loader + System1 controller (compute/apply/step) + main loop, hovers at z=2.0m	
+failures.py JOB: 3 failures: motor_damage, swinging_payload, sensor_wind	
+inject_payload.py JOB:	Run once to generate models/skydio_x2_payload.xml with the pendulum body	
+test_failures.py JOB:	Headless check that all 3 failures crash the baseline	
+patch.py JOB:	Validator + clamping + oracle patches + limp mode	
+allowed_patch.schema.json	JOB: The API contract you hand to AI/Modal teammates	
