@@ -248,53 +248,55 @@ class DualDroneSimulator:
         Returns:
             Tuple of (telemetry_drone1, telemetry_drone2).
         """
-        # 1. Update swinging cargo coupling for BOTH drones
-        self.chaos.apply_payload_physics(
-            self.model,
-            self.data,
-            self.d1_payload_id,
-            self.d1_tether_id,
-            self.d1_bob_id,
-            self.d1_payload_mass,
-            qpos_adr=self.d1_payload_qpos_adr,
-            qvel_adr=self.d1_payload_dof_adr,
-        )
-        self.chaos.apply_payload_physics(
-            self.model,
-            self.data,
-            self.d2_payload_id,
-            self.d2_tether_id,
-            self.d2_bob_id,
-            self.d2_payload_mass,
-            qpos_adr=self.d2_payload_qpos_adr,
-            qvel_adr=self.d2_payload_dof_adr,
-        )
-
-        # 2. Reset applied body forces and apply wind to BOTH drones
+        # 1. Reset applied body forces and generalized forces
         self.data.xfrc_applied[self.d1_body_id, :] = 0.0
         self.data.xfrc_applied[self.d2_body_id, :] = 0.0
         self.data.qfrc_applied[:] = 0.0
-        self.chaos.apply_wind_gust(self.data, self.d1_body_id, current_time)
-        self.chaos.apply_wind_gust(self.data, self.d2_body_id, current_time)
 
-        # 3. Read sensory state for Drone 1
+        sim_time = float(self.data.time)
+        dt = self.sim_cfg.physics_timestep
+
+        # 2. Apply physics perturbations (3D wind + payload aerodynamic drag) for Drone 1 & 2
+        wind_f1 = self.chaos.apply_drone_physics(
+            drone_idx=1,
+            model=self.model,
+            data=self.data,
+            drone_body_id=self.d1_body_id,
+            payload_body_id=self.d1_payload_id,
+            tether_geom_id=self.d1_tether_id,
+            bob_geom_id=self.d1_bob_id,
+            sim_time=sim_time,
+            payload_qpos_adr=self.d1_payload_qpos_adr,
+            payload_qvel_adr=self.d1_payload_dof_adr,
+        )
+        wind_f2 = self.chaos.apply_drone_physics(
+            drone_idx=2,
+            model=self.model,
+            data=self.data,
+            drone_body_id=self.d2_body_id,
+            payload_body_id=self.d2_payload_id,
+            tether_geom_id=self.d2_tether_id,
+            bob_geom_id=self.d2_bob_id,
+            sim_time=sim_time,
+            payload_qpos_adr=self.d2_payload_qpos_adr,
+            payload_qvel_adr=self.d2_payload_dof_adr,
+        )
+
+        # 3. Read sensory state for Drone 1 (with sensor noise/vibrations)
         pos_1 = self.data.qpos[self.d1_qpos_adr : self.d1_qpos_adr + 3].copy()
         vel_1 = self.data.qvel[self.d1_dof_adr : self.d1_dof_adr + 3].copy()
         quat_1 = self.data.qpos[self.d1_qpos_adr + 3 : self.d1_qpos_adr + 7].copy()
         raw_omega_1 = self.data.sensordata[self.d1_gyro_adr : self.d1_gyro_adr + 3].copy()
-        omega_1 = self.chaos.corrupt_sensor_data(raw_omega_1)
+        omega_1 = self.chaos.corrupt_sensors_for_drone(1, raw_omega_1, sim_time=sim_time)
 
-        # 4. Read sensory state for Drone 2
+        # 4. Read sensory state for Drone 2 (with sensor noise/vibrations)
         pos_2 = self.data.qpos[self.d2_qpos_adr : self.d2_qpos_adr + 3].copy()
         vel_2 = self.data.qvel[self.d2_dof_adr : self.d2_dof_adr + 3].copy()
         quat_2 = self.data.qpos[self.d2_qpos_adr + 3 : self.d2_qpos_adr + 7].copy()
         raw_omega_2 = self.data.sensordata[self.d2_gyro_adr : self.d2_gyro_adr + 3].copy()
-        omega_2 = self.chaos.corrupt_sensor_data(raw_omega_2)
+        omega_2 = self.chaos.corrupt_sensors_for_drone(2, raw_omega_2, sim_time=sim_time)
 
         # 5. Compute System 1 motor demands independently
-        sim_time = float(self.data.time)
-        dt = self.sim_cfg.physics_timestep
-
         thrust_1, diag_1 = self.controller_1.compute_motor_thrusts(
             pos_1, vel_1, quat_1, omega_1, sim_time=sim_time, dt=dt, target_pos=self.d1_target
         )
@@ -302,9 +304,9 @@ class DualDroneSimulator:
             pos_2, vel_2, quat_2, omega_2, sim_time=sim_time, dt=dt, target_pos=self.d2_target
         )
 
-        # 6. Apply hardware failure (Motor 1 degradation) to BOTH drones
-        actual_thrust_1 = self.chaos.degrade_actuators(thrust_1)
-        actual_thrust_2 = self.chaos.degrade_actuators(thrust_2)
+        # 6. Apply hardware failure / motor degradation per drone
+        actual_thrust_1 = self.chaos.degrade_actuators_for_drone(1, thrust_1, sim_time=sim_time)
+        actual_thrust_2 = self.chaos.degrade_actuators_for_drone(2, thrust_2, sim_time=sim_time)
 
         self.data.ctrl[self.d1_act_ids] = actual_thrust_1
         self.data.ctrl[self.d2_act_ids] = actual_thrust_2
@@ -322,6 +324,8 @@ class DualDroneSimulator:
             "omega": omega_1,
             "actual_thrust": actual_thrust_1,
             "target": self.d1_target,
+            "injected_wind_force": wind_f1,
+            "chaos_hud": self.chaos.get_hud_text(1),
         })
         diag_2.update({
             "pos": pos_2,
@@ -330,6 +334,8 @@ class DualDroneSimulator:
             "omega": omega_2,
             "actual_thrust": actual_thrust_2,
             "target": self.d2_target,
+            "injected_wind_force": wind_f2,
+            "chaos_hud": self.chaos.get_hud_text(2),
         })
 
         return diag_1, diag_2
@@ -377,9 +383,18 @@ class DualDroneSimulator:
 
                     tele_1, tele_2 = self.step_simulation(now)
 
-                    # 60 FPS Render Sync
+                    # 60 FPS Render Sync & In-Viewer HUD Update
                     if now - last_render >= render_interval:
                         viewer.opt.geomgroup[0:3] = 1
+
+                        # Render in-viewer HUD text overlays
+                        hud_d1 = f"D1 (Orange): {tele_1['chaos_hud']}"
+                        hud_d2 = f"D2 (Cyan):   {tele_2['chaos_hud']}"
+                        viewer.set_texts([
+                            (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_TOPLEFT, hud_d1, ""),
+                            (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_BOTTOMLEFT, hud_d2, ""),
+                        ])
+
                         viewer.sync()
                         last_render = now
 
