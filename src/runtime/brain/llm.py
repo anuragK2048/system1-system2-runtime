@@ -36,7 +36,7 @@ load_dotenv()
 
 
 SYSTEM_PROMPT = """You are the System 2 Autonomous Flight Reasoner for a Skydio X2 quadrotor.
-CRITICAL INSTRUCTION: Output valid JSON immediately. Keep reasoning under 50 words.
+CRITICAL INSTRUCTION: Output raw JSON immediately. No reasoning, no chain-of-thought, no markdown codeblocks. Keep diagnosis concise (under 20 words).
 
 Physical Specifications:
 - Mass: 1.325 kg, total hover weight W = mg ≈ 13.0 N.
@@ -109,7 +109,8 @@ class System2Brain:
 
     Supported providers:
       - 'groq': Ultra-fast Groq Cloud (~1.0s latency, default model: 'openai/gpt-oss-120b')
-      - 'baseten': Baseten endpoint (default model: 'meta-models/muse-spark-open-1026')
+      - 'baseten': Baseten endpoint (default model: 'deepseek-ai/DeepSeek-V4.1-Flash-Fast')
+      - 'fireworks': Fireworks AI (default model: 'accounts/fireworks/models/deepseek-v4p1-flash')
       - 'openai': OpenAI or custom OpenAI-compatible endpoint
     """
 
@@ -142,21 +143,41 @@ class System2Brain:
                     "GROQ_API_KEY not found in environment or .env file! "
                     "Please configure GROQ_API_KEY to enable System 2 LLM reasoning."
                 )
-            self.model = model or os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+            self.model = model or os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
             from groq import Groq
             self.client = Groq(api_key=self.api_key)
 
         elif self.provider == "baseten":
-            self.api_key = api_key or os.getenv("BASETEN_API_KEY")
+            self.model = model or os.getenv("BASETEN_MODEL", "meta-models/muse-spark-open-1026")
+            if "muse" in self.model.lower() and os.getenv("BASETEN_API_KEY_META"):
+                self.api_key = api_key or os.getenv("BASETEN_API_KEY_META")
+            else:
+                self.api_key = api_key or os.getenv("BASETEN_API_KEY")
+
             if not self.api_key:
                 raise ValueError(
-                    "BASETEN_API_KEY not found in environment or .env file! "
+                    "BASETEN_API_KEY or BASETEN_API_KEY_META not found in environment or .env file! "
                     "Please configure BASETEN_API_KEY to enable System 2 LLM reasoning."
                 )
             self.base_url = self.base_url or os.getenv(
                 "BASETEN_BASE_URL", "https://inference.baseten.co/v1"
             )
-            self.model = model or os.getenv("BASETEN_MODEL", "meta-models/muse-spark-open-1026")
+            self.client = OpenAI(
+                base_url=self.base_url,
+                api_key=self.api_key,
+            )
+
+        elif self.provider in ("fireworks", "firework"):
+            self.api_key = api_key or os.getenv("FIREWORK_API_KEY") or os.getenv("FIREWORKS_API_KEY")
+            if not self.api_key:
+                raise ValueError(
+                    "FIREWORK_API_KEY not found in environment or .env file! "
+                    "Please configure FIREWORK_API_KEY to enable Fireworks AI reasoning."
+                )
+            self.base_url = self.base_url or os.getenv(
+                "FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1"
+            )
+            self.model = model or os.getenv("FIREWORKS_MODEL", "accounts/fireworks/models/deepseek-v4p1-flash")
             self.client = OpenAI(
                 base_url=self.base_url,
                 api_key=self.api_key,
@@ -176,7 +197,7 @@ class System2Brain:
         else:
             raise ValueError(
                 f"Unsupported LLM provider '{self.provider}'. "
-                f"Supported providers: 'groq', 'baseten', 'openai'."
+                f"Supported providers: 'groq', 'baseten', 'fireworks', 'openai'."
             )
 
         # Telemetry & observability fields
@@ -556,6 +577,7 @@ class System2Worker:
             "call_count": self.brain.call_count,
             "patch_applied_time": patch_applied_t,
             "patch_age_s": round(patch_age, 2) if patch_age is not None else None,
+            "provider_usage": self.brain.logger.get_provider_usage_summary(),
         }
 
 

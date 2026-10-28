@@ -125,7 +125,15 @@ def get_bridge_status() -> Dict[str, Any]:
             } if latest_trig2 else None,
         },
         "system2": system2_status,
+        "provider_usage": sim_context._cached_llm_log_status.get("provider_usage") if getattr(sim_context, "_cached_llm_log_status", None) else None,
     }
+
+
+@router.get("/bridge/provider_usage")
+def get_provider_token_usage() -> Dict[str, Any]:
+    """Returns stateful total LLM calls, input tokens, output tokens, and total tokens partitioned by provider."""
+    from runtime.logging.llm_logger import get_llm_logger
+    return get_llm_logger().get_provider_usage_summary()
 
 
 @router.get("/bridge/llm_history")

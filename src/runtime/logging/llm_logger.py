@@ -16,7 +16,7 @@ import uuid
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field, asdict
 
 
@@ -71,10 +71,14 @@ class LLMLogger:
 
         self.jsonl_path = self.log_dir / jsonl_filename
         self.text_path = self.log_dir / text_filename
+        self.usage_json_path = self.log_dir / "provider_token_usage.json"
+        self.usage_log_path = self.log_dir / "provider_token_usage.log"
         self.max_in_memory = max_in_memory
 
         self._lock = threading.Lock()
         self._history: List[LLMCallRecord] = []
+        self._provider_usage: Dict[str, Dict[str, Any]] = {}
+        self._init_provider_usage()
 
     def log_call(
         self,
@@ -160,7 +164,266 @@ class LLMLogger:
             except Exception as e:
                 print(f"⚠️ [LLM LOGGER] Failed to write to {self.text_path}: {e}")
 
+            # 4. Stateful token usage ledger update (separated by provider)
+            try:
+                self._update_provider_usage_locked(record)
+            except Exception as e:
+                print(f"⚠️ [LLM LOGGER] Failed to update provider usage ledger: {e}")
+
         return record
+
+    def _extract_provider_and_model(self, model: str, metadata: Optional[Dict[str, Any]] = None) -> Tuple[str, str]:
+        """Resolves canonical provider key ('baseten', 'groq', 'fireworks', 'openai') and model name."""
+        prov = metadata.get("provider") if metadata else None
+        model_str = model or ""
+        if ":" in model_str:
+            p, m = model_str.split(":", 1)
+            return p.lower().strip(), m.strip()
+        if prov:
+            return prov.lower().strip(), model_str.strip()
+
+        m_lower = model_str.lower()
+        if "muse" in m_lower or "baseten" in m_lower or "deepseek-v4" in m_lower:
+            return "baseten", model_str
+        if "fireworks" in m_lower or "accounts/fireworks" in m_lower:
+            return "fireworks", model_str
+        if "gpt-oss" in m_lower or "groq" in m_lower or "qwen" in m_lower:
+            return "groq", model_str
+        return "groq", model_str
+
+    def _init_provider_usage(self) -> None:
+        """Initializes or restores the stateful token usage ledger from disk."""
+        # 1. Try reading existing JSON state
+        if self.usage_json_path.exists():
+            try:
+                with open(self.usage_json_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self._provider_usage = data.get("providers", {})
+                    return
+            except Exception as e:
+                print(f"⚠️ [LLM LOGGER] Could not load {self.usage_json_path}: {e}")
+
+        # 2. Rebuild state by aggregating historical records from llm_calls.jsonl if present
+        self._provider_usage = {
+            "baseten": self._make_empty_provider_dict(),
+            "groq": self._make_empty_provider_dict(),
+            "fireworks": self._make_empty_provider_dict(),
+        }
+
+        if self.jsonl_path.exists():
+            try:
+                with open(self.jsonl_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if not line.strip():
+                            continue
+                        try:
+                            d = json.loads(line)
+                            prov, mod = self._extract_provider_and_model(
+                                d.get("model", ""), d.get("metadata", {})
+                            )
+                            if prov not in self._provider_usage:
+                                self._provider_usage[prov] = self._make_empty_provider_dict()
+
+                            p_data = self._provider_usage[prov]
+                            p_data["total_calls"] += 1
+                            if d.get("status") == "success":
+                                p_data["successful_calls"] += 1
+                            else:
+                                p_data["failed_calls"] += 1
+
+                            pt = int(d.get("prompt_tokens") or 0)
+                            ct = int(d.get("completion_tokens") or 0)
+                            tt = int(d.get("total_tokens") or (pt + ct))
+
+                            p_data["prompt_tokens"] += pt
+                            p_data["completion_tokens"] += ct
+                            p_data["total_tokens"] += tt
+                            p_data["last_call_iso"] = d.get("timestamp_iso")
+
+                            if mod not in p_data["models"]:
+                                p_data["models"][mod] = {
+                                    "total_calls": 0,
+                                    "prompt_tokens": 0,
+                                    "completion_tokens": 0,
+                                    "total_tokens": 0,
+                                }
+                            m_data = p_data["models"][mod]
+                            m_data["total_calls"] += 1
+                            m_data["prompt_tokens"] += pt
+                            m_data["completion_tokens"] += ct
+                            m_data["total_tokens"] += tt
+                        except Exception:
+                            continue
+            except Exception as e:
+                print(f"⚠️ [LLM LOGGER] Error scanning historical logs: {e}")
+
+        self._write_provider_usage_files()
+
+    @staticmethod
+    def _make_empty_provider_dict() -> Dict[str, Any]:
+        return {
+            "total_calls": 0,
+            "successful_calls": 0,
+            "failed_calls": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "last_call_iso": None,
+            "models": {},
+        }
+
+    def _update_provider_usage_locked(self, record: LLMCallRecord) -> None:
+        """Updates in-memory token ledger and flushes to disk (must be called with _lock held)."""
+        prov, mod = self._extract_provider_and_model(record.model, record.metadata)
+        if prov not in self._provider_usage:
+            self._provider_usage[prov] = self._make_empty_provider_dict()
+
+        p_data = self._provider_usage[prov]
+        p_data["total_calls"] += 1
+        if record.status == "success":
+            p_data["successful_calls"] += 1
+        else:
+            p_data["failed_calls"] += 1
+
+        p_data["prompt_tokens"] += record.prompt_tokens
+        p_data["completion_tokens"] += record.completion_tokens
+        p_data["total_tokens"] += record.total_tokens
+        p_data["last_call_iso"] = record.timestamp_iso
+
+        if mod not in p_data["models"]:
+            p_data["models"][mod] = {
+                "total_calls": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            }
+        m_data = p_data["models"][mod]
+        m_data["total_calls"] += 1
+        m_data["prompt_tokens"] += record.prompt_tokens
+        m_data["completion_tokens"] += record.completion_tokens
+        m_data["total_tokens"] += record.total_tokens
+
+        self._write_provider_usage_files()
+
+    def get_provider_usage_summary(self) -> Dict[str, Any]:
+        """Returns deep copy of stateful token/credit usage summary partitioned by provider."""
+        with self._lock:
+            grand_total = {
+                "total_calls": 0,
+                "successful_calls": 0,
+                "failed_calls": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            }
+            for p, d in self._provider_usage.items():
+                grand_total["total_calls"] += d.get("total_calls", 0)
+                grand_total["successful_calls"] += d.get("successful_calls", 0)
+                grand_total["failed_calls"] += d.get("failed_calls", 0)
+                grand_total["prompt_tokens"] += d.get("prompt_tokens", 0)
+                grand_total["completion_tokens"] += d.get("completion_tokens", 0)
+                grand_total["total_tokens"] += d.get("total_tokens", 0)
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            return {
+                "last_updated_iso": now_iso,
+                "grand_total": grand_total,
+                "providers": {k: dict(v) for k, v in self._provider_usage.items()},
+            }
+
+    def _write_provider_usage_files(self) -> None:
+        """Writes both machine-readable JSON and human-readable ledger tables."""
+        summary = {
+            "last_updated_iso": datetime.now(timezone.utc).isoformat(),
+            "last_updated_unix": time.time(),
+            "providers": self._provider_usage,
+        }
+
+        # 1. Write provider_token_usage.json
+        try:
+            with open(self.usage_json_path, "w", encoding="utf-8") as f:
+                json.dump(summary, f, indent=2, default=str)
+        except Exception as e:
+            print(f"⚠️ [LLM LOGGER] Failed to write {self.usage_json_path}: {e}")
+
+        # 2. Write provider_token_usage.log
+        try:
+            with open(self.usage_log_path, "w", encoding="utf-8") as f:
+                f.write(self._format_provider_usage_ledger())
+        except Exception as e:
+            print(f"⚠️ [LLM LOGGER] Failed to write {self.usage_log_path}: {e}")
+
+    def _format_provider_usage_ledger(self) -> str:
+        """Formats a clean, stateful ledger showing token usage and credits across providers."""
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        lines = [
+            "=" * 98,
+            "📊 SYSTEM 2 STATEFUL LLM TOKEN & CREDIT USAGE LEDGER (BY PROVIDER)",
+            f"Last Updated: {now_iso}",
+            "=" * 98,
+            f"{'Provider':<14} {'Calls (OK/Err)':<18} {'Prompt Tokens':<16} {'Completion Tokens':<20} {'Total Tokens':<14} {'Last Active'}",
+            "-" * 98,
+        ]
+
+        tot_calls = 0
+        tot_ok = 0
+        tot_err = 0
+        tot_pt = 0
+        tot_ct = 0
+        tot_tt = 0
+
+        # Sort standard providers first
+        order = ["baseten", "groq", "fireworks"]
+        all_keys = order + [k for k in sorted(self._provider_usage.keys()) if k not in order]
+
+        for prov in all_keys:
+            d = self._provider_usage.get(prov, self._make_empty_provider_dict())
+            c = d.get("total_calls", 0)
+            ok = d.get("successful_calls", 0)
+            err = d.get("failed_calls", 0)
+            pt = d.get("prompt_tokens", 0)
+            ct = d.get("completion_tokens", 0)
+            tt = d.get("total_tokens", 0)
+            last_ts = d.get("last_call_iso") or "Never"
+            if len(last_ts) > 19:
+                last_ts = last_ts[:19].replace("T", " ")
+
+            tot_calls += c
+            tot_ok += ok
+            tot_err += err
+            tot_pt += pt
+            tot_ct += ct
+            tot_tt += tt
+
+            calls_str = f"{c} ({ok}/{err})"
+            lines.append(
+                f"{prov.upper():<14} {calls_str:<18} {pt:<16,d} {ct:<20,d} {tt:<14,d} {last_ts}"
+            )
+
+        lines.extend([
+            "-" * 98,
+            f"{'TOTAL':<14} {f'{tot_calls} ({tot_ok}/{tot_err})':<18} {tot_pt:<16,d} {tot_ct:<20,d} {tot_tt:<14,d}",
+            "=" * 98,
+            "\n📋 DETAILED MODEL BREAKDOWN BY PROVIDER:",
+        ])
+
+        for prov in all_keys:
+            d = self._provider_usage.get(prov, {})
+            models = d.get("models", {})
+            lines.append(f"\n[{prov.upper()}] - {d.get('total_calls', 0)} calls, {d.get('total_tokens', 0):,d} tokens")
+            if not models:
+                lines.append("  • No calls recorded yet.")
+            else:
+                for m_name, m_stats in sorted(models.items()):
+                    lines.append(
+                        f"  • {m_name}: {m_stats.get('total_calls', 0)} calls | "
+                        f"In: {m_stats.get('prompt_tokens', 0):,d} | "
+                        f"Out: {m_stats.get('completion_tokens', 0):,d} | "
+                        f"Total: {m_stats.get('total_tokens', 0):,d} tokens"
+                    )
+
+        lines.append("=" * 98 + "\n")
+        return "\n".join(lines)
 
     def get_recent_calls(self, limit: int = 10) -> List[LLMCallRecord]:
         """Retrieves the most recent N logged LLM calls."""

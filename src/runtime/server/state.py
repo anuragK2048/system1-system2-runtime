@@ -298,6 +298,7 @@ class SimulationContext:
 
         import json
         from pathlib import Path
+        from runtime.logging.llm_logger import get_llm_logger
         log_path = Path("logs/llm_calls.jsonl")
         if not log_path.exists():
             return None
@@ -338,6 +339,7 @@ class SimulationContext:
                     "call_count": len(lines),
                     "patch_applied_time": ts_unix,
                     "patch_age_s": round(max(0.0, time.time() - ts_unix), 2) if patch_dict else None,
+                    "provider_usage": get_llm_logger().get_provider_usage_summary(),
                 }
                 self._cached_llm_log_status = result
                 self._cached_llm_log_time = now
