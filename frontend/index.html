@@ -1,0 +1,1762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>System 1 / System 2 Drone Flight Control & Chaos Testbed</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-darkest: #07090E;
+      --bg-darker: #0D1117;
+      --bg-card: #161B22;
+      --bg-card-hover: #1C2128;
+      --border-color: #30363D;
+      --border-focus: #58A6FF;
+      --text-main: #F0F6FC;
+      --text-muted: #8B949E;
+      --text-dim: #6E7681;
+      
+      --d1-orange: #FF7B00;
+      --d1-orange-glow: rgba(255, 123, 0, 0.25);
+      --d2-cyan: #00D8F6;
+      --d2-cyan-glow: rgba(0, 216, 246, 0.25);
+      
+      --accent-green: #3FB950;
+      --accent-green-glow: rgba(63, 185, 80, 0.25);
+      --accent-red: #F85149;
+      --accent-red-glow: rgba(248, 81, 73, 0.25);
+      --accent-amber: #D29922;
+      --accent-purple: #BC8CFF;
+      --accent-purple-glow: rgba(188, 140, 255, 0.25);
+      
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-darkest);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      line-height: 1.5;
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg-darkest); }
+    ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+    /* Header Bar */
+    header {
+      background: var(--bg-darker);
+      border-bottom: 1px solid var(--border-color);
+      padding: 10px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(12px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand h1 {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      color: #FFFFFF;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge-hybrid {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 2px 7px;
+      border-radius: 12px;
+      background: rgba(188, 140, 255, 0.15);
+      border: 1px solid rgba(188, 140, 255, 0.4);
+      color: var(--accent-purple);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .conn-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: rgba(22, 27, 34, 0.8);
+      border: 1px solid var(--border-color);
+    }
+
+    .conn-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent-red);
+      transition: background 0.3s ease;
+    }
+
+    .conn-dot.online {
+      background: var(--accent-green);
+      box-shadow: 0 0 8px var(--accent-green);
+    }
+
+    .btn-reset-drones {
+      background: rgba(248, 81, 73, 0.12);
+      border: 1px solid rgba(248, 81, 73, 0.35);
+      color: #FFA198;
+      font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+    }
+
+    .btn-reset-drones:hover {
+      background: rgba(248, 81, 73, 0.25);
+      border-color: var(--accent-red);
+      color: #FFFFFF;
+      transform: translateY(-1px);
+    }
+
+    /* Main Grid Layout */
+    .dashboard-container {
+      display: grid;
+      grid-template-columns: 340px 1fr 340px;
+      gap: 16px;
+      padding: 16px 20px;
+      height: calc(100vh - 54px);
+      max-width: 1920px;
+      margin: 0 auto;
+    }
+
+    @media (max-width: 1440px) {
+      .dashboard-container {
+        grid-template-columns: 320px 1fr 320px;
+        gap: 12px;
+        padding: 12px;
+      }
+    }
+
+    @media (max-width: 1200px) {
+      .dashboard-container {
+        grid-template-columns: 1fr;
+        height: auto;
+      }
+    }
+
+    .panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    }
+
+    .panel-header {
+      background: rgba(22, 27, 34, 0.95);
+      border-bottom: 1px solid var(--border-color);
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .panel-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .panel-body {
+      padding: 14px;
+      overflow-y: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Section Headers */
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Target Selector Tabs */
+    .target-tabs {
+      display: flex;
+      background: var(--bg-darker);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 3px;
+      gap: 3px;
+    }
+
+    .target-tab {
+      flex: 1;
+      text-align: center;
+      padding: 5px 4px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: transparent;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .target-tab:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .target-tab.active {
+      color: #FFFFFF;
+      background: #21262D;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    }
+
+    .target-tab.active[data-target="drone1"] {
+      color: var(--d1-orange);
+      border-bottom: 2px solid var(--d1-orange);
+    }
+
+    .target-tab.active[data-target="drone2"] {
+      color: var(--d2-cyan);
+      border-bottom: 2px solid var(--d2-cyan);
+    }
+
+    /* Preset Grid */
+    .preset-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .preset-card {
+      background: var(--bg-darker);
+      border: 1px solid var(--border-color);
+      border-radius: 7px;
+      padding: 9px 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-align: left;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      position: relative;
+    }
+
+    .preset-card:hover {
+      background: #1C2128;
+      border-color: #58A6FF;
+      transform: translateY(-1px);
+    }
+
+    .preset-card.active {
+      border-color: #58A6FF;
+      background: rgba(88, 166, 255, 0.14);
+      box-shadow: 0 0 10px rgba(88, 166, 255, 0.25);
+    }
+
+    .preset-card.active::after {
+      content: "ACTIVE";
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      padding: 1px 4px;
+      border-radius: 3px;
+      background: rgba(88, 166, 255, 0.25);
+      color: #58A6FF;
+    }
+
+    .preset-card[data-preset="0"].active {
+      border-color: var(--accent-green);
+      background: rgba(35, 134, 54, 0.15);
+      box-shadow: 0 0 10px rgba(35, 134, 54, 0.25);
+    }
+
+    .preset-card[data-preset="0"].active::after {
+      content: "CLEAN";
+      color: var(--accent-green);
+      background: rgba(35, 134, 54, 0.25);
+    }
+
+    .preset-name {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .preset-desc {
+      font-size: 10px;
+      color: var(--text-dim);
+      line-height: 1.3;
+    }
+
+    /* Sliders & Controls */
+    .control-group {
+      background: var(--bg-darker);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .control-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .control-label-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .control-val {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 5px;
+      border-radius: 3px;
+      background: #21262D;
+      outline: none;
+      transition: background 0.2s;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #58A6FF;
+      cursor: pointer;
+      transition: transform 0.15s, background 0.2s;
+      box-shadow: 0 0 6px rgba(88, 166, 255, 0.5);
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+      background: #79C0FF;
+    }
+
+    /* Motor 4-Grid Sliders */
+    .motor-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .motor-box {
+      background: rgba(22, 27, 34, 0.6);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .btn-action {
+      background: #21262D;
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+
+    .btn-action:hover {
+      background: #30363D;
+      border-color: #8B949E;
+    }
+
+    /* Middle Panel: Dual Drone Telemetry */
+    .drones-comparison {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      flex: 1;
+    }
+
+    .drone-col {
+      background: var(--bg-darker);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .drone-col.d1-border {
+      border-top: 3px solid var(--d1-orange);
+    }
+
+    .drone-col.d2-border {
+      border-top: 3px solid var(--d2-cyan);
+    }
+
+    .drone-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .drone-name {
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .drone-mode-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-muted);
+    }
+
+    .drone-stat-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 10px;
+      text-transform: uppercase;
+      font-family: var(--font-mono);
+    }
+
+    .drone-stat-badge.hover {
+      background: var(--accent-green-glow);
+      color: var(--accent-green);
+      border: 1px solid var(--accent-green);
+    }
+
+    .drone-stat-badge.drift {
+      background: rgba(210, 153, 34, 0.2);
+      color: var(--accent-amber);
+      border: 1px solid var(--accent-amber);
+    }
+
+    .drone-stat-badge.crash {
+      background: var(--accent-red-glow);
+      color: var(--accent-red);
+      border: 1px solid var(--accent-red);
+    }
+
+    /* Metric Cards */
+    .metric-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .metric-box {
+      background: #161B22;
+      border: 1px solid #21262D;
+      border-radius: 6px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .metric-title {
+      font-size: 10px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+    }
+
+    .metric-value {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    /* 4-Motor Thrust Meters */
+    .thrust-meters {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .thrust-bar-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+    }
+
+    .thrust-bar-label {
+      width: 22px;
+      color: var(--text-muted);
+    }
+
+    .thrust-bar-track {
+      flex: 1;
+      height: 8px;
+      background: #21262D;
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .thrust-bar-fill {
+      height: 100%;
+      background: #58A6FF;
+      border-radius: 4px;
+      transition: width 0.08s ease;
+    }
+
+    .thrust-bar-fill.d1 { background: var(--d1-orange); }
+    .thrust-bar-fill.d2 { background: var(--d2-cyan); }
+    .thrust-bar-fill.degraded { background: var(--accent-red); }
+
+    .thrust-bar-val {
+      width: 38px;
+      text-align: right;
+      color: var(--text-main);
+    }
+
+    /* Right Panel: Bridge & LLM Monitor */
+    .trigger-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .trigger-card {
+      background: var(--bg-darker);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+
+    .trigger-card.active {
+      border-color: var(--accent-red);
+      background: rgba(248, 81, 73, 0.15);
+    }
+
+    .trigger-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-dim);
+    }
+
+    .trigger-card.active .trigger-indicator {
+      background: var(--accent-red);
+      box-shadow: 0 0 8px var(--accent-red);
+    }
+
+    .trigger-text {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .trigger-card.active .trigger-text {
+      color: #FFFFFF;
+    }
+
+    /* LLM Reasoning Card */
+    .llm-card {
+      background: var(--bg-darker);
+      border: 1px solid rgba(188, 140, 255, 0.35);
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: 0 0 16px rgba(188, 140, 255, 0.06);
+    }
+
+    .llm-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .llm-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent-purple);
+    }
+
+    .llm-latency {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 5px;
+      background: rgba(188, 140, 255, 0.12);
+      border: 1px solid rgba(188, 140, 255, 0.35);
+      color: var(--accent-purple);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.25s ease;
+    }
+
+    .llm-latency.in-flight {
+      background: rgba(210, 153, 34, 0.16);
+      border-color: rgba(210, 153, 34, 0.6);
+      color: var(--accent-amber);
+      animation: pulseGlow 1.2s infinite ease-in-out;
+    }
+
+    .llm-latency.success {
+      background: rgba(63, 185, 80, 0.14);
+      border-color: rgba(63, 185, 80, 0.45);
+      color: var(--accent-green);
+    }
+
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.65; transform: scale(0.98); }
+    }
+
+    /* LLM Call Timing & Timestamp Box */
+    .llm-timing-box {
+      background: rgba(13, 17, 23, 0.95);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+    }
+
+    .timing-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .timing-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-muted);
+      font-weight: 500;
+      min-width: 95px;
+    }
+
+    .dot-timing {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .dot-dispatched { background: var(--d2-cyan); box-shadow: 0 0 6px var(--d2-cyan-glow); }
+    .dot-received { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green-glow); }
+    .dot-waiting { background: var(--accent-amber); animation: pulseGlow 1.0s infinite; }
+
+    .timing-val {
+      color: #FFFFFF;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+
+    .timing-rel {
+      color: var(--text-dim);
+      font-size: 9px;
+      margin-left: auto;
+    }
+
+    /* Patch Applied Live Timer Badge */
+    .patch-timer-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: rgba(110, 118, 129, 0.12);
+      border: 1px solid rgba(110, 118, 129, 0.3);
+      color: var(--text-dim);
+      text-transform: none;
+      letter-spacing: 0;
+      transition: all 0.25s ease;
+    }
+
+    .patch-timer-badge.active {
+      background: rgba(63, 185, 80, 0.15);
+      border-color: rgba(63, 185, 80, 0.45);
+      color: var(--accent-green);
+      box-shadow: 0 0 10px rgba(63, 185, 80, 0.15);
+    }
+
+    .timer-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      display: inline-block;
+    }
+
+    .patch-timer-badge.active .timer-dot {
+      background: var(--accent-green);
+      box-shadow: 0 0 6px var(--accent-green);
+      animation: pulseGlow 1.5s infinite;
+    }
+
+    .llm-diagnosis {
+      font-size: 11px;
+      color: var(--text-main);
+      background: rgba(22, 27, 34, 0.8);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 8px 10px;
+      line-height: 1.4;
+      font-style: italic;
+    }
+
+    /* Active Patch Diff */
+    .patch-diff-box {
+      background: #0D1117;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 10px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .patch-line {
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .patch-k { color: var(--text-muted); }
+    .patch-v { color: var(--accent-purple); font-weight: 600; }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header -->
+  <header>
+    <div class="brand">
+      <h1>
+        <span>🚁 SKYDIO X2</span>
+        <span style="color: var(--text-muted); font-weight: 300;">|</span>
+        <span style="font-weight: 500;">System-1 / System-2 Autonomous Flight Testbed</span>
+      </h1>
+      <span class="badge-hybrid">Hybrid MuJoCo + Web Control</span>
+    </div>
+
+    <div class="header-actions">
+      <div class="conn-status">
+        <span class="conn-dot" id="connDot"></span>
+        <span id="connLabel">Connecting...</span>
+      </div>
+      <button class="btn-reset-drones" id="btnResetAll" title="Restore level hover and clear all failure modes">
+        🔄 Reset Drones
+      </button>
+    </div>
+  </header>
+
+  <!-- 3-Column Modern Grid Dashboard -->
+  <main class="dashboard-container">
+
+    <!-- ================================================================= -->
+    <!-- COLUMN 1: REAL-TIME CHAOS INJECTION CENTER                        -->
+    <!-- ================================================================= -->
+    <section class="panel">
+      <div class="panel-header">
+        <span class="panel-title">⚡ Chaos Injection Center</span>
+        <span style="font-size: 10px; color: var(--text-dim);" id="activeChaosBadge">All Clear</span>
+      </div>
+
+      <div class="panel-body">
+        
+        <!-- Target Selector -->
+        <div>
+          <div class="section-title">Target Drone Control</div>
+          <div class="target-tabs">
+            <button class="target-tab active" data-target="both" id="tabBoth">Synchronize Both</button>
+            <button class="target-tab" data-target="drone2" id="tabD2" style="border-bottom: 2px solid var(--d2-cyan);">🔵 Left (Cyan / D2)</button>
+            <button class="target-tab" data-target="drone1" id="tabD1" style="border-bottom: 2px solid var(--d1-orange);">🟠 Right (Orange / D1)</button>
+          </div>
+        </div>
+
+        <!-- One-Click Presets (Multi-Select Enabled) -->
+        <div>
+          <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Repeatable Presets</span>
+            <span style="font-size: 9px; color: #58A6FF; font-weight: normal; text-transform: none; letter-spacing: normal;">⚡ Multi-Select (Click to Toggle)</span>
+          </div>
+          <div class="preset-grid">
+            <div class="preset-card" data-preset="1" id="pre1">
+              <div class="preset-name">💥 Motor 1 Cut</div>
+              <div class="preset-desc">40% thrust + blade flutter</div>
+            </div>
+            <div class="preset-card" data-preset="2" id="pre2">
+              <div class="preset-name">💨 6.5N Crosswind</div>
+              <div class="preset-desc">Lateral push + turbulence</div>
+            </div>
+            <div class="preset-card" data-preset="3" id="pre3">
+              <div class="preset-name">📦 Tethered Cargo</div>
+              <div class="preset-desc">0.35kg bob + wind drag</div>
+            </div>
+            <div class="preset-card" data-preset="4" id="pre4">
+              <div class="preset-name">⚡ IMU Chatter</div>
+              <div class="preset-desc">0.85 rad/s sensor noise</div>
+            </div>
+            <div class="preset-card" data-preset="5" id="pre5">
+              <div class="preset-name">🌪️ Triple Stress</div>
+              <div class="preset-desc">M1 cut + Wind + Cargo</div>
+            </div>
+            <div class="preset-card active" data-preset="0" id="pre0">
+              <div class="preset-name">🟢 Clean Nominal</div>
+              <div class="preset-desc">Restore pristine hover</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4-Motor Continuous Health Sliders -->
+        <div class="control-group">
+          <div class="section-title" style="margin: 0;">Motor Thrust Health (0 - 100%)</div>
+          <div class="motor-grid">
+            <div class="motor-box">
+              <div class="control-label-row">
+                <span>M1 (Rear-L)</span>
+                <span class="control-val" id="valM1">100%</span>
+              </div>
+              <input type="range" id="sliderM1" min="0" max="100" value="100">
+            </div>
+            <div class="motor-box">
+              <div class="control-label-row">
+                <span>M2 (Rear-R)</span>
+                <span class="control-val" id="valM2">100%</span>
+              </div>
+              <input type="range" id="sliderM2" min="0" max="100" value="100">
+            </div>
+            <div class="motor-box">
+              <div class="control-label-row">
+                <span>M3 (Front-R)</span>
+                <span class="control-val" id="valM3">100%</span>
+              </div>
+              <input type="range" id="sliderM3" min="0" max="100" value="100">
+            </div>
+            <div class="motor-box">
+              <div class="control-label-row">
+                <span>M4 (Front-L)</span>
+                <span class="control-val" id="valM4">100%</span>
+              </div>
+              <input type="range" id="sliderM4" min="0" max="100" value="100">
+            </div>
+          </div>
+        </div>
+
+        <!-- 3D Wind Vector -->
+        <div class="control-group">
+          <div class="section-title" style="margin: 0;">3D Wind Disturbance</div>
+          
+          <div class="control-row">
+            <div class="control-label-row">
+              <span>Wind Force (+X Crosswind)</span>
+              <span class="control-val" id="valWindF">0.0 N</span>
+            </div>
+            <input type="range" id="sliderWindF" min="0" max="150" value="0">
+          </div>
+
+          <div class="control-row">
+            <div class="control-label-row">
+              <span>Dryden Turbulence</span>
+              <span class="control-val" id="valTurb">0.0 N</span>
+            </div>
+            <input type="range" id="sliderTurb" min="0" max="20" value="0">
+          </div>
+
+          <button class="btn-action" id="btnGust">
+            💨 Trigger 7.0N Wind Gust Pulse (0.8s)
+          </button>
+        </div>
+
+        <!-- Tethered Cargo & Sensor Noise -->
+        <div class="control-group">
+          <div class="section-title" style="margin: 0;">Cargo & Sensor Noise</div>
+          
+          <div class="control-row" style="flex-direction: row; justify-content: space-between; align-items: center;">
+            <label style="font-size: 11px; font-weight: 600; cursor: pointer;" for="chkPayload">
+              📦 Attach Tethered Cargo (0.35kg)
+            </label>
+            <input type="checkbox" id="chkPayload" style="width: 16px; height: 16px; cursor: pointer;">
+          </div>
+
+          <div class="control-row">
+            <div class="control-label-row">
+              <span>IMU Gyro Chatter Noise</span>
+              <span class="control-val" id="valGyroNoise">0.00 rad/s</span>
+            </div>
+            <input type="range" id="sliderGyroNoise" min="0" max="150" value="0">
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ================================================================= -->
+    <!-- COLUMN 2: DUAL DRONE STATUS & RESILIENCE COMPARISON               -->
+    <!-- ================================================================= -->
+    <section class="panel">
+      <div class="panel-header">
+        <span class="panel-title">📊 Dual-Drone Comparative Telemetry</span>
+        <span style="font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);" id="physicsFps">500 Hz Physics</span>
+      </div>
+
+      <div class="panel-body">
+        <div class="drones-comparison">
+          
+          <!-- LEFT DRONE: DRONE 2 (CYAN) -->
+          <div class="drone-col d2-border">
+            <div class="drone-head">
+              <span class="drone-name" style="color: var(--d2-cyan);">
+                🔵 Left Drone (Cyan / D2)
+              </span>
+              <span class="drone-stat-badge hover" id="d2Badge">HOVER</span>
+            </div>
+            <span class="drone-mode-tag" id="d2Mode">System-1 (L1 Adaptive) + System-2 (LLM Meta-Controller)</span>
+
+            <!-- Core Flight Metrics -->
+            <div class="metric-grid">
+              <div class="metric-box">
+                <span class="metric-title">Position Error</span>
+                <span class="metric-value" id="d2Err">0.00 m</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-title">Altitude (Z)</span>
+                <span class="metric-value" id="d2Alt">1.00 m</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-title">Roll Angle</span>
+                <span class="metric-value" id="d2Roll">+0.0°</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-title">Pitch Angle</span>
+                <span class="metric-value" id="d2Pitch">+0.0°</span>
+              </div>
+            </div>
+
+            <!-- Thrust Bars -->
+            <div class="thrust-meters">
+              <span class="section-title" style="margin: 4px 0 2px 0;">Motor Thrusts (0 - 13N)</span>
+              <div class="thrust-bar-row">
+                <span class="thrust-bar-label">M1</span>
+                <div class="thrust-bar-track"><div class="thrust-bar-fill d2" id="barD2M1" style="width: 25%;"></div></div>
+                <span class="thrust-bar-val" id="txtD2M1">3.2N</span>
+              </div>
+              <div class="thrust-bar-row">
+                <span class="thrust-bar-label">M2</span>
+                <div class="thrust-bar-track"><div class="thrust-bar-fill d2" id="barD2M2" style="width: 25%;"></div></div>
+                <span class="thrust-bar-val" id="txtD2M2">3.2N</span>
+              </div>
+              <div class="thrust-bar-row">
+                <span class="thrust-bar-label">M3</span>
+                <div class="thrust-bar-track"><div class="thrust-bar-fill d2" id="barD2M3" style="width: 25%;"></div></div>
+                <span class="thrust-bar-val" id="txtD2M3">3.2N</span>
+              </div>
+              <div class="thrust-bar-row">
+                <span class="thrust-bar-label">M4</span>
+                <div class="thrust-bar-track"><div class="thrust-bar-fill d2" id="barD2M4" style="width: 25%;"></div></div>
+                <span class="thrust-bar-val" id="txtD2M4">3.2N</span>
+              </div>
+            </div>
+
+            <!-- Disturbance Observer vs Ground Truth -->
+            <div class="metric-box" style="margin-top: auto;">
+              <span class="metric-title">L1 Observer Disturbance Estimate</span>
+              <span class="metric-value" style="font-size: 11px; color: var(--d2-cyan);" id="d2EstWind">[0.0, 0.0, 0.0] N</span>
+            </div>
+          </div>
+
+          <!-- RIGHT DRONE: DRONE 1 (ORANGE) -->
+          <div class="drone-col d1-border">
+            <div class="drone-head">
+              <span class="drone-name" style="color: var(--d1-orange);">
+                🟠 Right Drone (Orange / D1)
+              </span>
+              <span class="drone-stat-badge hover" id="d1Badge">HOVER</span>
+            </div>
+            <span class="drone-mode-tag" id="d1Mode">System-1 (Classical PID)</span>
+
+            <!-- Core Flight Metrics -->
+            <div class="metric-grid">
+              <div class="metric-box">
+                <span class="metric-title">Position Error</span>
+                <span class="metric-value" id="d1Err">0.00 m</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-title">Altitude (Z)</span>
+                <span class="metric-value" id="d1Alt">1.00 m</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-title">Roll Angle</span>
+                <span class="metric-value" id="d1Roll">+0.0°</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-title">Pitch Angle</span>
+                <span class="metric-value" id="d1Pitch">+0.0°</span>
+              </div>
+            </div>
+
+            <!-- Thrust Bars -->
+            <div class="thrust-meters">
+              <span class="section-title" style="margin: 4px 0 2px 0;">Motor Thrusts (0 - 13N)</span>
+              <div class="thrust-bar-row">
+                <span class="thrust-bar-label">M1</span>
+                <div class="thrust-bar-track"><div class="thrust-bar-fill d1" id="barD1M1" style="width: 25%;"></div></div>
+                <span class="thrust-bar-val" id="txtD1M1">3.2N</span>
+              </div>
+              <div class="thrust-bar-row">
+                <span class="thrust-bar-label">M2</span>
+                <div class="thrust-bar-track"><div class="thrust-bar-fill d1" id="barD1M2" style="width: 25%;"></div></div>
+                <span class="thrust-bar-val" id="txtD1M2">3.2N</span>
+              </div>
+              <div class="thrust-bar-row">
+                <span class="thrust-bar-label">M3</span>
+                <div class="thrust-bar-track"><div class="thrust-bar-fill d1" id="barD1M3" style="width: 25%;"></div></div>
+                <span class="thrust-bar-val" id="txtD1M3">3.2N</span>
+              </div>
+              <div class="thrust-bar-row">
+                <span class="thrust-bar-label">M4</span>
+                <div class="thrust-bar-track"><div class="thrust-bar-fill d1" id="barD1M4" style="width: 25%;"></div></div>
+                <span class="thrust-bar-val" id="txtD1M4">3.2N</span>
+              </div>
+            </div>
+
+            <!-- Disturbance Estimates -->
+            <div class="metric-box" style="margin-top: auto;">
+              <span class="metric-title">Ground-Truth Wind</span>
+              <span class="metric-value" style="font-size: 11px;" id="d1TrueWind">[0.0, 0.0, 0.0] N</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================= -->
+    <!-- COLUMN 3: SYSTEM-1 / SYSTEM-2 BRIDGE & LLM MONITOR                -->
+    <!-- ================================================================= -->
+    <section class="panel">
+      <div class="panel-header">
+        <span class="panel-title">🧠 System 1 / 2 Bridge Monitor</span>
+        <span style="font-size: 10px; color: var(--accent-purple); font-weight: 700;" id="llmStatusBadge">Worker Ready</span>
+      </div>
+
+      <div class="panel-body">
+        
+        <!-- Fast Trigger Status -->
+        <div>
+          <div class="section-title">500 Hz Fast Trigger Channels</div>
+          <div class="trigger-grid">
+            <div class="trigger-card" id="trigPos">
+              <span class="trigger-indicator"></span>
+              <span class="trigger-text">Pos Err > 0.30m</span>
+            </div>
+            <div class="trigger-card" id="trigTilt">
+              <span class="trigger-indicator"></span>
+              <span class="trigger-text">Tilt > 25.0°</span>
+            </div>
+            <div class="trigger-card" id="trigGyro">
+              <span class="trigger-indicator"></span>
+              <span class="trigger-text">Gyro > 3.5 rad/s</span>
+            </div>
+            <div class="trigger-card" id="trigForce">
+              <span class="trigger-indicator"></span>
+              <span class="trigger-text">L1 Force > 3.0N</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- LLM Meta-Controller Card -->
+        <div class="llm-card">
+          <div class="llm-header">
+            <span class="llm-badge">
+              <span>✨</span>
+              <span>System 2 Meta-Controller</span>
+            </span>
+            <span class="llm-latency" id="llmLatency">
+              <span id="llmLatencyDot">⚡</span>
+              <span id="llmLatencyText">Ready (~1.5s)</span>
+            </span>
+          </div>
+
+          <!-- Transaction Call Timeline & Exact Timestamps -->
+          <div class="llm-timing-box">
+            <div class="timing-row">
+              <span class="timing-label">
+                <span class="dot-timing dot-dispatched"></span> Dispatched:
+              </span>
+              <span class="timing-val" id="timeDispatched">--:--:--.---</span>
+              <span class="timing-rel" id="relDispatched">--</span>
+            </div>
+            <div class="timing-row">
+              <span class="timing-label">
+                <span class="dot-timing dot-received" id="dotReceived"></span> Output Came:
+              </span>
+              <span class="timing-val" id="timeReceived">--:--:--.---</span>
+              <span class="timing-rel" id="relReceived">--</span>
+            </div>
+          </div>
+
+          <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase;">Latest Physical Diagnosis</div>
+          <div class="llm-diagnosis" id="llmDiagText">
+            "Nominal flight. All 4 rotors operating within hover envelope. No disturbance patches required."
+          </div>
+        </div>
+
+        <!-- Active Control Patch Diff -->
+        <div>
+          <div class="section-title">
+            <span>Active Control Patch</span>
+            <span class="patch-timer-badge" id="patchTimerBadge">
+              <span class="timer-dot" id="patchTimerDot"></span>
+              <span id="patchTimerText">No Active Patch</span>
+            </span>
+          </div>
+          <div class="patch-diff-box">
+            <div class="patch-line">
+              <span class="patch-k">Patch Applied Timer:</span>
+              <span class="patch-v" id="patchAgeLine" style="color: var(--accent-green);">None (Baseline Control)</span>
+            </div>
+            <div class="patch-line">
+              <span class="patch-k">Feedforward Force:</span>
+              <span class="patch-v" id="patchFF">[0.0, 0.0, 0.0] N</span>
+            </div>
+            <div class="patch-line">
+              <span class="patch-k">Motor Trim Scale:</span>
+              <span class="patch-v" id="patchTrim">[1.0, 1.0, 1.0, 1.0]</span>
+            </div>
+            <div class="patch-line">
+              <span class="patch-k">Pos Gain Multiplier:</span>
+              <span class="patch-v" id="patchPosGain">Kp: 1.0x | Kd: 1.0x</span>
+            </div>
+            <div class="patch-line">
+              <span class="patch-k">Att Gain Multiplier:</span>
+              <span class="patch-v" id="patchAttGain">Kp: 1.0x | Kd: 1.0x</span>
+            </div>
+            <div class="patch-line">
+              <span class="patch-k">Safety Envelope:</span>
+              <span class="patch-v" id="patchSafety">Max Tilt: 25.0°</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Architecture Diagram Card -->
+        <div style="background: var(--bg-darker); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; font-size: 10px; color: var(--text-dim); line-height: 1.4;">
+          <strong style="color: var(--text-muted); display: block; margin-bottom: 2px;">⚡ Dual-Loop Coordination:</strong>
+          System-1 stabilizes the quadrotor at 500 Hz via SE(3) Geometric control and L1 disturbance estimation.
+          When physical chaos triggers the bridge, System-2 reasons asynchronously via LLM and deploys compensatory feedforward offsets and trim scales without stopping the reflex loop.
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    // =========================================================================
+    // STATE & WEBSOCKET CLIENT
+    // =========================================================================
+    let ws = null;
+    let currentTarget = "both";
+    let activePreset = null;
+
+    // System 2 & Patch Observability State
+    let patchAppliedTime = null;
+    let callDispatchedTime = null;
+    let callReceivedTime = null;
+    let isInFlight = false;
+    let lastLatencyS = null;
+
+    const wsUrl = `ws://${window.location.host || 'localhost:8000'}/ws/telemetry`;
+
+    function formatTimestamp(ts) {
+      if (!ts || isNaN(ts) || ts <= 0) return "--:--:--.---";
+      const d = new Date(ts * 1000);
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      const ss = String(d.getSeconds()).padStart(2, '0');
+      const ms = String(d.getMilliseconds()).padStart(3, '0');
+      return `${hh}:${mm}:${ss}.${ms}`;
+    }
+
+    function formatRelative(ts) {
+      if (!ts || isNaN(ts) || ts <= 0) return "--";
+      const diffSec = Math.max(0, (Date.now() / 1000) - ts);
+      if (diffSec < 1.0) return "just now";
+      if (diffSec < 60) return `${diffSec.toFixed(1)}s ago`;
+      const mins = Math.floor(diffSec / 60);
+      const secs = Math.floor(diffSec % 60);
+      return `${mins}m ${secs}s ago`;
+    }
+
+    function formatSystemName(mode) {
+      if (!mode) return "System-1 (Classical PID)";
+      const m = mode.toLowerCase();
+      if (m.includes("l1") && m.includes("system2")) return "System-1 (L1 Adaptive) + System-2 (LLM Meta-Controller)";
+      if (m.includes("l1")) return "System-1 (L1 Adaptive - QuadLib)";
+      if (m.includes("system2")) return "System-1 (Classical PID) + System-2 (LLM Meta-Controller)";
+      return "System-1 (Classical PID)";
+    }
+
+    function connectWebSocket() {
+      const connDot = document.getElementById("connDot");
+      const connLabel = document.getElementById("connLabel");
+
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        connDot.classList.add("online");
+        connLabel.textContent = "Live Telemetry (30 Hz)";
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const packet = JSON.parse(event.data);
+          if (packet.drone1 && packet.drone2) {
+            updateDashboard(packet);
+          }
+        } catch (e) {
+          console.error("Malformed packet", e);
+        }
+      };
+
+      ws.onclose = () => {
+        connDot.classList.remove("online");
+        connLabel.textContent = "Reconnecting...";
+        setTimeout(connectWebSocket, 1500);
+      };
+
+      ws.onerror = () => {
+        ws.close();
+      };
+    }
+
+    // Initial HTTP fetch to seed dashboard immediately
+    fetch('/api/bridge/status')
+      .then(r => r.json())
+      .then(status => {
+        if (status.system2) {
+          const s2 = status.system2;
+          isInFlight = !!s2.in_flight;
+          if (s2.last_latency_s != null) lastLatencyS = s2.last_latency_s;
+          if (s2.last_call_dispatched_at != null) callDispatchedTime = s2.last_call_dispatched_at;
+          if (s2.last_call_received_at != null) callReceivedTime = s2.last_call_received_at;
+          if (s2.patch_applied_time != null) patchAppliedTime = s2.patch_applied_time;
+        }
+        tickLiveTimers();
+      })
+      .catch(() => {});
+
+    // =========================================================================
+    // DASHBOARD RENDERER (Called at 30 Hz on WebSocket Frame)
+    // =========================================================================
+    function updateDashboard(data) {
+      const d1 = data.drone1;
+      const d2 = data.drone2;
+      const s2 = data.system2;
+
+      // Update Right Drone (Drone 1 / Orange)
+      if (d1) {
+        const modeTag1 = document.getElementById("d1Mode");
+        if (modeTag1) modeTag1.textContent = d1.system_name || formatSystemName(d1.mode);
+
+        document.getElementById("d1Err").textContent = `${d1.pos_error_m.toFixed(2)} m`;
+        document.getElementById("d1Alt").textContent = `${d1.pos[2].toFixed(2)} m`;
+        document.getElementById("d1Roll").textContent = `${d1.rpy_deg[0] >= 0 ? '+' : ''}${d1.rpy_deg[0].toFixed(1)}°`;
+        document.getElementById("d1Pitch").textContent = `${d1.rpy_deg[1] >= 0 ? '+' : ''}${d1.rpy_deg[1].toFixed(1)}°`;
+        
+        const badge1 = document.getElementById("d1Badge");
+        badge1.textContent = d1.status;
+        badge1.className = `drone-stat-badge ${d1.status.toLowerCase()}`;
+
+        // Thrust meters
+        const t1 = d1.thrust_actual;
+        for (let i = 0; i < 4; i++) {
+          const pct = Math.min(100, Math.max(0, (t1[i] / 13.0) * 100));
+          document.getElementById(`barD1M${i+1}`).style.width = `${pct}%`;
+          document.getElementById(`txtD1M${i+1}`).textContent = `${t1[i].toFixed(1)}N`;
+        }
+
+        document.getElementById("d1TrueWind").textContent = `[${d1.f_dist_ground_truth.map(x => (x >= 0 ? '+' : '') + x.toFixed(1)).join(', ')}] N`;
+      }
+
+      // Update Left Drone (Drone 2 / Cyan)
+      if (d2) {
+        const modeTag2 = document.getElementById("d2Mode");
+        if (modeTag2) modeTag2.textContent = d2.system_name || formatSystemName(d2.mode);
+
+        document.getElementById("d2Err").textContent = `${d2.pos_error_m.toFixed(2)} m`;
+        document.getElementById("d2Alt").textContent = `${d2.pos[2].toFixed(2)} m`;
+        document.getElementById("d2Roll").textContent = `${d2.rpy_deg[0] >= 0 ? '+' : ''}${d2.rpy_deg[0].toFixed(1)}°`;
+        document.getElementById("d2Pitch").textContent = `${d2.rpy_deg[1] >= 0 ? '+' : ''}${d2.rpy_deg[1].toFixed(1)}°`;
+
+        const badge2 = document.getElementById("d2Badge");
+        badge2.textContent = d2.status;
+        badge2.className = `drone-stat-badge ${d2.status.toLowerCase()}`;
+
+        // Thrust meters
+        const t2 = d2.thrust_actual;
+        for (let i = 0; i < 4; i++) {
+          const pct = Math.min(100, Math.max(0, (t2[i] / 13.0) * 100));
+          document.getElementById(`barD2M${i+1}`).style.width = `${pct}%`;
+          document.getElementById(`txtD2M${i+1}`).textContent = `${t2[i].toFixed(1)}N`;
+        }
+
+        document.getElementById("d2EstWind").textContent = `[${d2.f_dist_estimated.map(x => (x >= 0 ? '+' : '') + x.toFixed(1)).join(', ')}] N`;
+
+        // Update Bridge Patch if available
+        if (d2.active_patch) {
+          const p = d2.active_patch;
+          if (p.diagnosis) {
+            document.getElementById("llmDiagText").textContent = `"${p.diagnosis}"`;
+          }
+          if (p.feedforward_force_offset) {
+            document.getElementById("patchFF").textContent = `[${p.feedforward_force_offset.map(x => (x >= 0 ? '+' : '') + x.toFixed(1)).join(', ')}] N`;
+          }
+          if (p.motor_trim_scale) {
+            document.getElementById("patchTrim").textContent = `[${p.motor_trim_scale.map(x => x.toFixed(2)).join(', ')}]`;
+          }
+          if (p.gain_multipliers) {
+            const g = p.gain_multipliers;
+            document.getElementById("patchPosGain").textContent = `Kp: ${g.pos_kp.toFixed(2)}x | Kd: ${g.pos_kd.toFixed(2)}x`;
+            document.getElementById("patchAttGain").textContent = `Kp: ${g.att_kp.toFixed(2)}x | Kd: ${g.att_kd.toFixed(2)}x`;
+          }
+          if (p.safety_envelope) {
+            document.getElementById("patchSafety").textContent = `Max Tilt: ${p.safety_envelope.max_tilt_deg.toFixed(1)}°`;
+          }
+
+          if (d2.patch_age_s != null && (!patchAppliedTime || patchAppliedTime <= 0)) {
+            patchAppliedTime = (Date.now() / 1000) - d2.patch_age_s;
+          }
+        } else {
+          patchAppliedTime = null;
+          document.getElementById("patchFF").textContent = "[0.0, 0.0, 0.0] N";
+          document.getElementById("patchTrim").textContent = "[1.0, 1.0, 1.0, 1.0]";
+          document.getElementById("patchPosGain").textContent = "Kp: 1.0x | Kd: 1.0x";
+          document.getElementById("patchAttGain").textContent = "Kp: 1.0x | Kd: 1.0x";
+          document.getElementById("patchSafety").textContent = "Max Tilt: 25.0°";
+        }
+
+        // Fast Triggers
+        const posExceeded = d2.pos_error_m > 0.30;
+        const tiltExceeded = Math.abs(d2.rpy_deg[0]) > 25.0 || Math.abs(d2.rpy_deg[1]) > 25.0;
+        const forceExceeded = Math.abs(d2.f_dist_estimated[0]) > 3.0 || Math.abs(d2.f_dist_estimated[1]) > 3.0;
+
+        document.getElementById("trigPos").classList.toggle("active", posExceeded);
+        document.getElementById("trigTilt").classList.toggle("active", tiltExceeded);
+        document.getElementById("trigForce").classList.toggle("active", forceExceeded);
+      }
+
+      // Update System 2 Telemetry & Observability
+      if (s2) {
+        isInFlight = !!s2.in_flight;
+        if (s2.last_latency_s != null) lastLatencyS = s2.last_latency_s;
+        if (s2.last_call_dispatched_at != null) callDispatchedTime = s2.last_call_dispatched_at;
+        if (s2.last_call_received_at != null) callReceivedTime = s2.last_call_received_at;
+        if (s2.patch_applied_time != null && d2 && d2.active_patch) patchAppliedTime = s2.patch_applied_time;
+
+        const statusBadge = document.getElementById("llmStatusBadge");
+        if (isInFlight) {
+          statusBadge.textContent = "Reasoning...";
+          statusBadge.style.color = "var(--accent-amber)";
+        } else if (d2 && d2.active_patch) {
+          statusBadge.textContent = (s2.worker_state === "STABLE") ? "Stable Hold" : "Patch Active";
+          statusBadge.style.color = "var(--accent-green)";
+        } else {
+          statusBadge.textContent = "Worker Ready";
+          statusBadge.style.color = "var(--accent-purple)";
+        }
+      }
+
+      // Update Chaos Center from Live State
+      if (data.chaos) {
+        const chaos = data.chaos;
+        const activePresets = chaos.active_presets || [];
+
+        // Update Multi-Select Preset Cards
+        document.querySelectorAll(".preset-card").forEach(card => {
+          const pid = card.dataset.preset;
+          if (pid === "0") {
+            card.classList.toggle("active", activePresets.length === 0);
+          } else {
+            card.classList.toggle("active", activePresets.includes(pid));
+          }
+        });
+
+        // Update Chaos Badge in Header
+        const badge = document.getElementById("activeChaosBadge");
+        if (badge) {
+          if (activePresets.length === 0) {
+            badge.textContent = "All Clear (Nominal)";
+            badge.style.color = "var(--text-dim)";
+          } else {
+            const labelMap = {
+              "1": "M1 Cut",
+              "2": "Crosswind",
+              "3": "Cargo",
+              "4": "IMU",
+              "5": "Triple Stress"
+            };
+            const activeLabels = activePresets.map(k => labelMap[k] || `P${k}`).join(" + ");
+            badge.textContent = `${activePresets.length} Active (${activeLabels})`;
+            badge.style.color = "var(--accent-red)";
+          }
+        }
+
+        // Sync Sliders if user is not actively interacting with them
+        syncSlidersFromChaos(chaos);
+      }
+
+      // Update timer displays immediately
+      tickLiveTimers();
+    }
+
+    // Synchronize UI sliders with current chaos parameters
+    function syncSlidersFromChaos(chaos) {
+      if (!chaos) return;
+      if (document.activeElement && document.activeElement.tagName === "INPUT") return;
+
+      const targetDroneState = (currentTarget === "drone2") ? chaos.drone2 : chaos.drone1;
+      if (!targetDroneState) return;
+
+      // Motor Sliders
+      if (targetDroneState.motor && targetDroneState.motor.multipliers) {
+        for (let i = 1; i <= 4; i++) {
+          const mult = targetDroneState.motor.multipliers[i - 1];
+          const pct = Math.round(mult * 100);
+          const slider = document.getElementById(`sliderM${i}`);
+          const valLabel = document.getElementById(`valM${i}`);
+          if (slider) slider.value = pct;
+          if (valLabel) valLabel.textContent = `${pct}%`;
+        }
+      }
+
+      // Wind Sliders
+      if (targetDroneState.wind) {
+        const fx = (targetDroneState.wind.steady_force && targetDroneState.wind.steady_force[0]) || 0;
+        const turb = targetDroneState.wind.turbulence_std || 0;
+        const sw = document.getElementById("sliderWindF");
+        const vw = document.getElementById("valWindF");
+        if (sw) sw.value = Math.round(fx * 10);
+        if (vw) vw.textContent = `${fx.toFixed(1)} N`;
+
+        const st = document.getElementById("sliderTurb");
+        const vt = document.getElementById("valTurb");
+        if (st) st.value = Math.round(turb * 10);
+        if (vt) vt.textContent = `${turb.toFixed(1)} N`;
+      }
+
+      // Payload Checkbox
+      if (targetDroneState.payload) {
+        const chk = document.getElementById("chkPayload");
+        if (chk) chk.checked = !!targetDroneState.payload.attached;
+      }
+
+      // Sensor Gyro Noise
+      if (targetDroneState.sensor) {
+        const gyro = targetDroneState.sensor.gyro_noise_std || 0;
+        const sg = document.getElementById("sliderGyroNoise");
+        const vg = document.getElementById("valGyroNoise");
+        if (sg) sg.value = Math.round(gyro * 100);
+        if (vg) vg.textContent = `${gyro.toFixed(2)} rad/s`;
+      }
+    }
+
+    // =========================================================================
+    // HIGH-FREQUENCY LIVE TIMERS TICKER (10 Hz)
+    // =========================================================================
+    function tickLiveTimers() {
+      const now = Date.now() / 1000;
+
+      // 1. System 2 Meta Controller Latency Display
+      const latencyBadge = document.getElementById("llmLatency");
+      const latencyText = document.getElementById("llmLatencyText");
+      const latencyDot = document.getElementById("llmLatencyDot");
+
+      if (isInFlight && callDispatchedTime) {
+        const inFlightElapsed = Math.max(0, now - callDispatchedTime);
+        latencyBadge.className = "llm-latency in-flight";
+        latencyDot.textContent = "🟡";
+        latencyText.textContent = `Reasoning... ${inFlightElapsed.toFixed(1)}s`;
+      } else if (lastLatencyS != null && lastLatencyS > 0) {
+        latencyBadge.className = "llm-latency success";
+        latencyDot.textContent = "⚡";
+        latencyText.textContent = `${lastLatencyS.toFixed(2)}s (${Math.round(lastLatencyS * 1000)}ms)`;
+      } else {
+        latencyBadge.className = "llm-latency";
+        latencyDot.textContent = "⚡";
+        latencyText.textContent = "Ready (~1.5s)";
+      }
+
+      // 2. Call Timeline: When Dispatched and When Output Came
+      const timeDisp = document.getElementById("timeDispatched");
+      const relDisp = document.getElementById("relDispatched");
+      const timeRecv = document.getElementById("timeReceived");
+      const relRecv = document.getElementById("relReceived");
+      const dotRecv = document.getElementById("dotReceived");
+
+      if (callDispatchedTime && callDispatchedTime > 0) {
+        timeDisp.textContent = formatTimestamp(callDispatchedTime);
+        relDisp.textContent = formatRelative(callDispatchedTime);
+      }
+
+      if (isInFlight) {
+        dotRecv.className = "dot-timing dot-waiting";
+        timeRecv.textContent = "Waiting for response...";
+        const waitElapsed = callDispatchedTime ? Math.max(0, now - callDispatchedTime).toFixed(1) : "0.0";
+        relRecv.textContent = `in-flight (${waitElapsed}s)`;
+      } else if (callReceivedTime && callReceivedTime > 0) {
+        dotRecv.className = "dot-timing dot-received";
+        timeRecv.textContent = formatTimestamp(callReceivedTime);
+        relRecv.textContent = formatRelative(callReceivedTime);
+      }
+
+      // 3. Latest Patch Applied Live Timer
+      const patchBadge = document.getElementById("patchTimerBadge");
+      const patchText = document.getElementById("patchTimerText");
+      const patchAgeLine = document.getElementById("patchAgeLine");
+
+      if (patchAppliedTime && patchAppliedTime > 0) {
+        const age = Math.max(0, now - patchAppliedTime);
+        patchBadge.classList.add("active");
+        patchText.textContent = `Active: ${age.toFixed(1)}s`;
+        patchAgeLine.textContent = `${age.toFixed(1)}s ago (${formatTimestamp(patchAppliedTime)})`;
+        patchAgeLine.style.color = "var(--accent-green)";
+      } else {
+        patchBadge.classList.remove("active");
+        patchText.textContent = "No Active Patch";
+        patchAgeLine.textContent = "None (Baseline Control)";
+        patchAgeLine.style.color = "var(--text-dim)";
+      }
+    }
+
+    // Run ticker at 10 Hz for fluid sub-second countup
+    setInterval(tickLiveTimers, 100);
+
+    // =========================================================================
+    // USER CONTROLS & API DISPATCH
+    // =========================================================================
+    function sendCommand(endpoint, body) {
+      fetch(`/api/chaos/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...body, target: currentTarget }),
+      }).catch(err => console.error("API error", err));
+    }
+
+    // Target Tabs
+    document.querySelectorAll(".target-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".target-tab").forEach(t => t.classList.remove("active"));
+        tab.classList.add("active");
+        currentTarget = tab.dataset.target;
+        sendCommand("target", { mode: currentTarget });
+      });
+    });
+
+    // Preset Cards (Multi-Select Enabled)
+    document.querySelectorAll(".preset-card").forEach(card => {
+      card.addEventListener("click", () => {
+        const id = card.dataset.preset;
+        if (id === "0") {
+          // Clear all chaos back to clean nominal
+          document.querySelectorAll(".preset-card").forEach(c => c.classList.remove("active"));
+          card.classList.add("active");
+          sendCommand("preset", { preset_id: "0", toggle: false });
+
+          // Reset UI sliders immediately
+          for (let i = 1; i <= 4; i++) {
+            document.getElementById(`sliderM${i}`).value = 100;
+            document.getElementById(`valM${i}`).textContent = "100%";
+          }
+          document.getElementById("sliderWindF").value = 0;
+          document.getElementById("valWindF").textContent = "0.0 N";
+          document.getElementById("sliderTurb").value = 0;
+          document.getElementById("valTurb").textContent = "0.0 N";
+          document.getElementById("chkPayload").checked = false;
+          document.getElementById("sliderGyroNoise").value = 0;
+          document.getElementById("valGyroNoise").textContent = "0.00 rad/s";
+        } else {
+          // Multi-select toggle: activate or deactivate this specific channel
+          const willBeActive = !card.classList.contains("active");
+          card.classList.toggle("active", willBeActive);
+          document.getElementById("pre0")?.classList.remove("active");
+          sendCommand("preset", { preset_id: id, toggle: true });
+        }
+      });
+    });
+
+    // Motor Sliders
+    for (let i = 1; i <= 4; i++) {
+      const slider = document.getElementById(`sliderM${i}`);
+      const valLabel = document.getElementById(`valM${i}`);
+      slider.addEventListener("input", () => {
+        const val = slider.value;
+        valLabel.textContent = `${val}%`;
+        const mult = parseFloat(val) / 100.0;
+        sendCommand("motor", { motor_idx: i - 1, multiplier: mult });
+      });
+    }
+
+    // Wind Sliders
+    const sliderWindF = document.getElementById("sliderWindF");
+    const valWindF = document.getElementById("valWindF");
+    sliderWindF.addEventListener("input", () => {
+      const val = (parseFloat(sliderWindF.value) / 10.0).toFixed(1);
+      valWindF.textContent = `${val} N`;
+      sendCommand("wind", { fx: parseFloat(val), fy: 0.0, fz: 0.0 });
+    });
+
+    const sliderTurb = document.getElementById("sliderTurb");
+    const valTurb = document.getElementById("valTurb");
+    sliderTurb.addEventListener("input", () => {
+      const val = (parseFloat(sliderTurb.value) / 10.0).toFixed(1);
+      valTurb.textContent = `${val} N`;
+      const currentFx = parseFloat(valWindF.textContent);
+      sendCommand("wind", { fx: currentFx, fy: 0.0, fz: 0.0, turbulence_std: parseFloat(val) });
+    });
+
+    // Gust Button
+    document.getElementById("btnGust").addEventListener("click", () => {
+      sendCommand("gust", { force: 7.0, duration_s: 0.8 });
+    });
+
+    // Payload Checkbox
+    const chkPayload = document.getElementById("chkPayload");
+    chkPayload.addEventListener("change", () => {
+      sendCommand("payload", { attached: chkPayload.checked, mass: 0.35, aerodynamic_drag: true });
+    });
+
+    // Sensor Noise Slider
+    const sliderGyroNoise = document.getElementById("sliderGyroNoise");
+    const valGyroNoise = document.getElementById("valGyroNoise");
+    sliderGyroNoise.addEventListener("input", () => {
+      const val = (parseFloat(sliderGyroNoise.value) / 100.0).toFixed(2);
+      valGyroNoise.textContent = `${val} rad/s`;
+      sendCommand("sensor", { gyro_noise_std: parseFloat(val) });
+    });
+
+    // Reset All Button
+    document.getElementById("btnResetAll").addEventListener("click", () => {
+      fetch('/api/chaos/reset_drones', { method: 'POST' }).then(() => {
+        document.querySelectorAll(".preset-card").forEach(c => c.classList.remove("active"));
+        document.getElementById("pre0").classList.add("active");
+        for (let i = 1; i <= 4; i++) {
+          document.getElementById(`sliderM${i}`).value = 100;
+          document.getElementById(`valM${i}`).textContent = "100%";
+        }
+        sliderWindF.value = 0;
+        valWindF.textContent = "0.0 N";
+        sliderTurb.value = 0;
+        valTurb.textContent = "0.0 N";
+        chkPayload.checked = false;
+        sliderGyroNoise.value = 0;
+        valGyroNoise.textContent = "0.00 rad/s";
+      });
+    });
+
+    // Start WebSocket
+    connectWebSocket();
+  </script>
+</body>
+</html>

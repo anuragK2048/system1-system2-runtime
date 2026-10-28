@@ -25,6 +25,7 @@ import sys
 import argparse
 from typing import Tuple
 from runtime.sim.dual_simulator import DualDroneSimulator
+from runtime.sim.config import get_system_naming
 
 
 PRESETS = {
@@ -76,13 +77,13 @@ def interactive_selection() -> Tuple[str, str]:
 
     if choice == "5":
         print("\nAvailable Controller Modes:")
-        print("  [1] System-1 (PID)")
+        print("  [1] System-1 (Classical PID)")
         print("  [2] System-1 (L1 Adaptive - QuadLib)")
-        print("  [3] System-1 (PID) + System-2 LLM Meta-Controller")
-        print("  [4] System-1 (L1 Adaptive) + System-2 LLM Meta-Controller")
+        print("  [3] System-1 (Classical PID) + System-2 (LLM Meta-Controller)")
+        print("  [4] System-1 (L1 Adaptive) + System-2 (LLM Meta-Controller)")
 
-        c1 = input("Choose Drone 1 (Left / Orange) [1-4] (default: 1): ").strip() or "1"
-        c2 = input("Choose Drone 2 (Right / Cyan)  [1-4] (default: 4): ").strip() or "4"
+        c2 = input("Choose Left Drone  (Cyan / D2)   [1-4] (default: 4): ").strip() or "4"
+        c1 = input("Choose Right Drone (Orange / D1) [1-4] (default: 1): ").strip() or "1"
 
         d1 = MODE_ALIASES.get(c1, "pid")
         d2 = MODE_ALIASES.get(c2, "l1_adaptive+system2")
@@ -107,13 +108,13 @@ def main() -> None:
         "--drone1",
         type=str,
         default=None,
-        help="Drone 1 (Left): pid, l1_adaptive, pid+system2, l1_adaptive+system2",
+        help="Drone 1 (Right / Orange): pid, l1_adaptive, pid+system2, l1_adaptive+system2",
     )
     parser.add_argument(
         "--drone2",
         type=str,
         default=None,
-        help="Drone 2 (Right): pid, l1_adaptive, pid+system2, l1_adaptive+system2",
+        help="Drone 2 (Left / Cyan): pid, l1_adaptive, pid+system2, l1_adaptive+system2",
     )
     parser.add_argument(
         "--provider",
@@ -132,6 +133,18 @@ def main() -> None:
         "--interactive",
         action="store_true",
         help="Launch interactive terminal selector prompt at startup",
+    )
+    parser.add_argument(
+        "--serve",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Start FastAPI + WebSocket live control server in background (default: True)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port for live control server (default: 8000)",
     )
 
     args = parser.parse_args()
@@ -158,7 +171,11 @@ def main() -> None:
         d2_mode = "l1_adaptive+system2"
 
     provider_label = args.provider or "groq (default)"
-    print(f"\n🚀 Launching Dual Drone Simulator: [Drone 1: {d1_mode}] vs [Drone 2: {d2_mode}]")
+    d1_sys = get_system_naming(d1_mode)
+    d2_sys = get_system_naming(d2_mode)
+    print(f"\n🚀 Launching Dual Drone Simulator:")
+    print(f"   🔵 Left Drone  (Cyan / D2):  {d2_sys['system_name']}")
+    print(f"   🟠 Right Drone (Orange / D1): {d1_sys['system_name']}")
     print(f"🧠 System 2 LLM Provider: [{provider_label}]")
     sim = DualDroneSimulator(
         drone1_mode=d1_mode,
@@ -166,6 +183,24 @@ def main() -> None:
         llm_provider=args.provider,
         llm_model=args.model,
     )
+
+    # Launch background FastAPI & WebSocket control server if requested
+    if args.serve:
+        import threading
+        import uvicorn
+        from runtime.server.app import app
+
+        def _run_server():
+            config = uvicorn.Config(app=app, host="0.0.0.0", port=args.port, log_level="warning")
+            server = uvicorn.Server(config)
+            server.run()
+
+        server_thread = threading.Thread(target=_run_server, name="WebServerThread", daemon=True)
+        server_thread.start()
+        print(f"🌐 [WEB DASHBOARD] Live Control Server started at: http://localhost:{args.port}")
+        print(f"   • API Documentation: http://localhost:{args.port}/docs")
+        print(f"   • Telemetry Stream:  ws://localhost:{args.port}/ws/telemetry\n")
+
     sim.run()
 
 

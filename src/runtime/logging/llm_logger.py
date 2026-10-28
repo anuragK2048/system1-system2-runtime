@@ -147,7 +147,7 @@ class LLMLogger:
             # 2. Append to JSON Lines file
             try:
                 with open(self.jsonl_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(record.to_dict()) + "\n")
+                    f.write(json.dumps(record.to_dict(), default=str) + "\n")
                     f.flush()
             except Exception as e:
                 print(f"⚠️ [LLM LOGGER] Failed to write to {self.jsonl_path}: {e}")
@@ -202,41 +202,42 @@ class LLMLogger:
     @staticmethod
     def _format_text_entry(r: LLMCallRecord) -> str:
         """Formats a human-readable ledger block for text logging."""
+        dur = float(r.duration_s) if isinstance(r.duration_s, (int, float)) else 0.0
+        status_str = str(r.status).upper()
         lines = [
             "\n" + "=" * 74,
             f"🧠 LLM CALL RECORD [{r.call_id}] - {r.timestamp_iso}",
-            f"Model: {r.model} | Latency: {r.duration_s:.2f}s | Status: {r.status.upper()}",
+            f"Model: {r.model} | Latency: {dur:.2f}s | Status: {status_str}",
             f"Tokens: Prompt={r.prompt_tokens} | Completion={r.completion_tokens} | Total={r.total_tokens}"
             + (f" (Reasoning={r.reasoning_tokens})" if r.reasoning_tokens is not None else ""),
             "-" * 74,
             "📥 INPUT PROMPT:",
-            r.user_prompt.strip(),
+            str(r.user_prompt).strip(),
             "-" * 74,
             "📤 OUTPUT:",
         ]
 
-        if r.status == "error":
+        if str(r.status) == "error":
             lines.append(f"❌ ERROR: {r.error_message}")
             if r.raw_output:
                 lines.append(f"Raw Output: {r.raw_output}")
         else:
             if r.parsed_patch:
                 lines.append("Parsed Patch:")
-                lines.append(json.dumps(r.parsed_patch, indent=2))
+                lines.append(json.dumps(r.parsed_patch, indent=2, default=str))
             else:
-                lines.append(r.raw_output or "(Empty output)")
+                lines.append(str(r.raw_output or "(Empty output)"))
 
         if r.reasoning_content:
             lines.append("-" * 74)
-            lines.append(f"💭 Reasoning Trace ({len(r.reasoning_content)} chars):")
-            # Truncate reasoning trace if exceedingly long
-            trace_preview = r.reasoning_content.strip()
+            lines.append(f"💭 Reasoning Trace ({len(str(r.reasoning_content))} chars):")
+            trace_preview = str(r.reasoning_content).strip()
             if len(trace_preview) > 500:
                 trace_preview = trace_preview[:250] + "\n... [truncated] ...\n" + trace_preview[-250:]
             lines.append(trace_preview)
 
         lines.append("=" * 74 + "\n")
-        return "\n".join(lines)
+        return "\n".join(str(l) for l in lines)
 
 
 # Global default logger singleton

@@ -4,8 +4,8 @@ What does the Dual Simulator do?
 ---------------------------------
 This module allows running two independent drones in the exact same MuJoCo physics
 world simultaneously for real-time, side-by-side visual and quantitative comparison:
-1. Drone 1 (Left / Orange Accents): Configurable System 1 & System 2 setup.
-2. Drone 2 (Right / Cyan Accents): Configurable System 1 & System 2 setup.
+1. Drone 2 (Left / Cyan Accents): Configurable System 1 & System 2 setup.
+2. Drone 1 (Right / Orange Accents): Configurable System 1 & System 2 setup.
 3. Synchronized Chaos: Both drones experience the exact same failure events at the
    exact same instant (motor cuts, wind gusts, sensor noise, swinging payload).
 4. Auto-Tracking Camera: Keeps both drones framed in the 3D OpenGL viewport.
@@ -25,6 +25,7 @@ from runtime.sim.config import (
     PIDConfig,
     L1Config,
     ChaosConfig,
+    get_system_naming,
 )
 from runtime.sim.system1_controller import System1Controller
 from runtime.sim.chaos_injector import ChaosManager
@@ -85,8 +86,15 @@ class DualDroneSimulator:
         self.l1_cfg = l1_cfg or L1Config()
         self.chaos = ChaosManager(cfg=chaos_cfg)
 
+        # Register with server state context for live WebSocket & REST control
+        try:
+            from runtime.server.state import sim_context
+            sim_context.attach_simulator(self)
+        except Exception:
+            pass
+
         # ----------------------------------------------------------------------
-        # Target Setpoints: Drone 1 (Left: Y = -1.2m), Drone 2 (Right: Y = +1.2m)
+        # Target Setpoints: Drone 2 (Left: Y = +1.2m), Drone 1 (Right: Y = -1.2m)
         # ----------------------------------------------------------------------
         target_z = self.drone_cfg.target_z
         self.d1_target = np.array([0.0, -1.2, target_z], dtype=np.float32)
@@ -150,14 +158,14 @@ class DualDroneSimulator:
                     bridge=self.bridge_1,
                     provider=self.llm_provider,
                     model=self.llm_model,
-                    drone_name="Drone 1 (Left)",
+                    drone_name="Drone 1 (Right / Orange)",
                 )
             if self.d2_enable_system2:
                 self.worker_2 = System2Worker(
                     bridge=self.bridge_2,
                     provider=self.llm_provider,
                     model=self.llm_model,
-                    drone_name="Drone 2 (Right)",
+                    drone_name="Drone 2 (Left / Cyan)",
                 )
 
         # ----------------------------------------------------------------------
@@ -338,6 +346,13 @@ class DualDroneSimulator:
             "chaos_hud": self.chaos.get_hud_text(2),
         })
 
+        # Record latest telemetry into server context for WebSocket streaming
+        try:
+            from runtime.server.state import sim_context
+            sim_context.record_telemetry(diag_1, diag_2)
+        except Exception:
+            pass
+
         return diag_1, diag_2
 
     def run(self) -> None:
@@ -372,27 +387,46 @@ class DualDroneSimulator:
                 render_interval = 1.0 / self.sim_cfg.render_fps
                 last_render = time.time()
                 last_print = time.time()
+                sim_wall_start = time.time()
+                sim_start_time = float(self.data.time)
+
+                tele_1 = {}
+                tele_2 = {}
 
                 while viewer.is_running():
-                    step_start = time.time()
                     now = time.time()
 
                     if self.chaos.reset_requested:
                         self.reset_simulation()
                         self.chaos.reset_requested = False
+                        sim_wall_start = time.time()
+                        sim_start_time = float(self.data.time)
 
-                    tele_1, tele_2 = self.step_simulation(now)
+                    # Real-time wall clock synchronization:
+                    # Advance 500 Hz physics steps to match elapsed real-world time at 1.0x real speed
+                    target_sim_time = sim_start_time + (now - sim_wall_start)
+                    substeps = 0
+                    while float(self.data.time) < target_sim_time and substeps < 25:
+                        tele_1, tele_2 = self.step_simulation(float(self.data.time))
+                        substeps += 1
+
+                    # Soft resync if physics lagged behind >60ms (e.g. window moved or OS sleep)
+                    if (target_sim_time - float(self.data.time)) > 0.060:
+                        sim_wall_start = time.time()
+                        sim_start_time = float(self.data.time)
 
                     # 60 FPS Render Sync & In-Viewer HUD Update
                     if now - last_render >= render_interval:
                         viewer.opt.geomgroup[0:3] = 1
 
-                        # Render in-viewer HUD text overlays
-                        hud_d1 = f"D1 (Orange): {tele_1['chaos_hud']}"
-                        hud_d2 = f"D2 (Cyan):   {tele_2['chaos_hud']}"
+                        # Render in-viewer HUD text overlays (Left Drone on TOPLEFT, Right Drone on TOPRIGHT)
+                        d2_name = get_system_naming(self.drone2_mode)["system_short"]
+                        d1_name = get_system_naming(self.drone1_mode)["system_short"]
+                        hud_d2 = f"Left [Cyan - {d2_name}]: {tele_2.get('chaos_hud', '')}"
+                        hud_d1 = f"Right [Orange - {d1_name}]: {tele_1.get('chaos_hud', '')}"
                         viewer.set_texts([
-                            (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_TOPLEFT, hud_d1, ""),
-                            (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_BOTTOMLEFT, hud_d2, ""),
+                            (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_TOPLEFT, hud_d2, ""),
+                            (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_TOPRIGHT, hud_d1, ""),
                         ])
 
                         viewer.sync()
@@ -400,12 +434,16 @@ class DualDroneSimulator:
 
                     # Telemetry Logging
                     if now - last_print > self.sim_cfg.telemetry_print_interval:
-                        self._print_comparative_telemetry(tele_1, tele_2)
+                        if tele_1 and tele_2:
+                            self._print_comparative_telemetry(tele_1, tele_2)
                         last_print = now
 
-                    time_until_next = physics_dt - (time.time() - step_start)
-                    if time_until_next > 0:
-                        time.sleep(time_until_next)
+                    # Yield CPU briefly to OS and background Web server
+                    time_ahead = float(self.data.time) - (time.time() - sim_wall_start + sim_start_time)
+                    if time_ahead > 0:
+                        time.sleep(min(time_ahead, 0.002))
+                    else:
+                        time.sleep(0.0005)
 
         finally:
             if self.worker_1:
@@ -471,11 +509,13 @@ class DualDroneSimulator:
         stat1 = "💥 CRASH" if pos1[2] < 0.15 else ("🚨 DRIFT" if err1 > 0.40 else "🟢 HOVER")
         stat2 = "💥 CRASH" if pos2[2] < 0.15 else ("🚨 DRIFT" if err2 > 0.40 else "🟢 HOVER")
 
-        d1_label = f"D1 ({self.drone1_mode})"[:20]
-        d2_label = f"D2 ({self.drone2_mode})"[:20]
+        d2_naming = get_system_naming(self.drone2_mode)
+        d1_naming = get_system_naming(self.drone1_mode)
+        d2_label = f"Left [Cyan / D2: {d2_naming['system_short']}]"
+        d1_label = f"Right [Orange / D1: {d1_naming['system_short']}]"
 
         print(
-            f"[{stat1}] {d1_label:<20} | Pos=({pos1[0]:+.2f},{pos1[1]:+.2f}) Alt={pos1[2]:.2f}m Err={err1:.2f}m Roll={roll1:+.1f}°{l1_str1}{p1_str}\n"
-            f"[{stat2}] {d2_label:<20} | Pos=({pos2[0]:+.2f},{pos2[1]:+.2f}) Alt={pos2[2]:.2f}m Err={err2:.2f}m Roll={roll2:+.1f}°{l1_str2}{p2_str}"
+            f"[{stat2}] {d2_label:<35} | Pos=({pos2[0]:+.2f},{pos2[1]:+.2f}) Alt={pos2[2]:.2f}m Err={err2:.2f}m Roll={roll2:+.1f}°{l1_str2}{p2_str}\n"
+            f"[{stat1}] {d1_label:<35} | Pos=({pos1[0]:+.2f},{pos1[1]:+.2f}) Alt={pos1[2]:.2f}m Err={err1:.2f}m Roll={roll1:+.1f}°{l1_str1}{p1_str}"
         )
-        print("-" * 78)
+        print("-" * 88)

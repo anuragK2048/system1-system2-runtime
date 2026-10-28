@@ -15,8 +15,8 @@ from typing import Dict, List, Optional, Set, Tuple, Any
 import numpy as np
 import mujoco
 
-from runtime.sim.config import ChaosConfig
 from runtime.chaos.models import (
+    ChaosConfig,
     ChaosTarget,
     DroneChaosState,
     MotorChaosConfig,
@@ -105,8 +105,8 @@ class ChaosManager:
 
     Attributes:
         cfg: Baseline ChaosConfig parameters.
-        drone1: Chaos state for Drone 1 (Left / Orange).
-        drone2: Chaos state for Drone 2 (Right / Cyan).
+        drone2: Chaos state for Drone 2 (Left / Cyan).
+        drone1: Chaos state for Drone 1 (Right / Orange).
         target_mode: ChaosTarget ('both', 'drone1', 'drone2').
         reset_requested: Boolean flag when reset is requested.
         active_chaos: Backward-compatible dictionary of active failure modes.
@@ -253,17 +253,157 @@ class ChaosManager:
     def apply_preset(
         self,
         preset_key: str,
+        additive: bool = False,
         target: Optional[ChaosTarget] = None,
     ) -> str:
-        """Applies a named preset to the target drone(s)."""
+        """Applies a named preset scenario to the target drone(s).
+
+        If additive is True, layers the failure mode onto currently active chaos.
+        If additive is False, replaces the entire state (legacy behavior).
+        """
         with self._lock:
-            new_state = get_preset_state(preset_key)
             target_mode = target or self.target_mode
-            if target_mode in (ChaosTarget.BOTH, ChaosTarget.DRONE1):
-                self.drone1 = get_preset_state(preset_key)
-            if target_mode in (ChaosTarget.BOTH, ChaosTarget.DRONE2):
-                self.drone2 = get_preset_state(preset_key)
+            targets = self._get_target_states(target_mode)
+
+            if str(preset_key) in ("0", "clean"):
+                self.clear_all(target=target_mode)
+                return f"Clean nominal hover restored on {target_mode.value}"
+
+            if additive:
+                self._activate_preset_channels(preset_key, targets)
+                return f"Preset '{preset_key}' added to {target_mode.value}"
+
+            for s in targets:
+                new_state = get_preset_state(preset_key)
+                s.motor = new_state.motor
+                s.wind = new_state.wind
+                s.payload = new_state.payload
+                s.sensor = new_state.sensor
             return f"Preset '{preset_key}' applied to {target_mode.value}"
+
+    def toggle_preset(
+        self,
+        preset_key: str,
+        target: Optional[ChaosTarget] = None,
+    ) -> Dict[str, Any]:
+        """Toggles a specific chaos channel (motor, wind, cargo, sensor) on or off.
+
+        Enables composing multiple independent failures simultaneously on both drones.
+        """
+        with self._lock:
+            target_mode = target or self.target_mode
+            targets = self._get_target_states(target_mode)
+
+            if str(preset_key) in ("0", "clean"):
+                self.clear_all(target=target_mode)
+                return {
+                    "action": "cleared",
+                    "preset_id": "0",
+                    "active_presets": self.get_active_preset_keys(target_mode),
+                    "summary": self.get_chaos_summary(),
+                }
+
+            is_active = self._is_preset_active_on_states(preset_key, targets)
+            if is_active:
+                self._deactivate_preset_channels(preset_key, targets)
+                action = "deactivated"
+            else:
+                self._activate_preset_channels(preset_key, targets)
+                action = "activated"
+
+            return {
+                "action": action,
+                "preset_id": preset_key,
+                "active_presets": self.get_active_preset_keys(target_mode),
+                "summary": self.get_chaos_summary(),
+            }
+
+    def _is_preset_active_on_states(self, preset_key: str, states: List[DroneChaosState]) -> bool:
+        """Determines if a given preset is currently active across target states."""
+        key = str(preset_key).lower().strip()
+        if key in ("1", "chipped_propeller", "m1"):
+            return any(s.motor.multipliers[0] < 0.95 or s.motor.chipped_motor_idx is not None for s in states)
+        elif key in ("2", "microburst_wind", "wind"):
+            return any(s.wind.enabled and abs(s.wind.steady_force[0]) > 0.5 for s in states)
+        elif key in ("3", "tethered_cargo_wind", "payload", "cargo"):
+            return any(s.payload.attached for s in states)
+        elif key in ("4", "sensor_chatter", "sensor", "imu"):
+            return any(s.sensor.enabled and s.sensor.gyro_noise_std > 0.05 for s in states)
+        elif key in ("5", "compound_stress", "compound"):
+            return all(
+                s.motor.multipliers[0] < 0.95 and s.wind.enabled and s.payload.attached
+                for s in states
+            )
+        elif key in ("0", "clean"):
+            return not any(s.is_any_active() for s in states)
+        return False
+
+    def _activate_preset_channels(self, preset_key: str, states: List[DroneChaosState]) -> None:
+        """Activates only the specific failure channels targeted by this preset."""
+        key = str(preset_key).lower().strip()
+        if key in ("1", "chipped_propeller", "m1"):
+            for s in states:
+                s.motor.multipliers = [0.40, 1.0, 1.0, 1.0]
+                s.motor.chipped_motor_idx = 0
+        elif key in ("2", "microburst_wind", "wind"):
+            for s in states:
+                s.wind.enabled = True
+                s.wind.steady_force = [6.5, 0.0, 0.0]
+                s.wind.turbulence_std = 0.8
+        elif key in ("3", "tethered_cargo_wind", "payload", "cargo"):
+            for s in states:
+                s.payload.attached = True
+                s.payload.mass = 0.35
+                s.payload.aerodynamic_drag_enabled = True
+                if not s.wind.enabled:
+                    s.wind.enabled = True
+                    s.wind.steady_force = [4.0, 1.0, 0.0]
+        elif key in ("4", "sensor_chatter", "sensor", "imu"):
+            for s in states:
+                s.sensor.enabled = True
+                s.sensor.gyro_noise_std = 0.85
+                s.sensor.harmonic_freq_hz = 85.0
+                s.sensor.harmonic_amplitude = 0.3
+        elif key in ("5", "compound_stress", "compound"):
+            for s in states:
+                s.motor.multipliers = [0.50, 1.0, 1.0, 1.0]
+                s.motor.chipped_motor_idx = 0
+                s.wind.enabled = True
+                s.wind.steady_force = [5.0, 0.0, 0.0]
+                s.wind.turbulence_std = 0.5
+                s.payload.attached = True
+                s.payload.mass = 0.35
+                s.payload.aerodynamic_drag_enabled = True
+
+    def _deactivate_preset_channels(self, preset_key: str, states: List[DroneChaosState]) -> None:
+        """Deactivates only the specific failure channels targeted by this preset."""
+        key = str(preset_key).lower().strip()
+        if key in ("1", "chipped_propeller", "m1"):
+            for s in states:
+                s.motor.reset()
+        elif key in ("2", "microburst_wind", "wind"):
+            for s in states:
+                s.wind.reset()
+        elif key in ("3", "tethered_cargo_wind", "payload", "cargo"):
+            for s in states:
+                s.payload.reset()
+        elif key in ("4", "sensor_chatter", "sensor", "imu"):
+            for s in states:
+                s.sensor.reset()
+        elif key in ("5", "compound_stress", "compound"):
+            for s in states:
+                s.motor.reset()
+                s.wind.reset()
+                s.payload.reset()
+
+    def get_active_preset_keys(self, target: Optional[ChaosTarget] = None) -> List[str]:
+        """Returns list of preset IDs currently active on target drone(s)."""
+        states = self._get_target_states(target or self.target_mode)
+        active = []
+        for k in ("1", "2", "3", "4", "5"):
+            if self._is_preset_active_on_states(k, states):
+                active.append(k)
+        return active
 
     def clear_all(self, target: Optional[ChaosTarget] = None) -> None:
         """Restores target drone(s) back to pristine unperturbed nominal flight."""
@@ -282,6 +422,7 @@ class ChaosManager:
                 "target_mode": self.target_mode.value,
                 "drone1": self.drone1.to_dict(),
                 "drone2": self.drone2.to_dict(),
+                "active_presets": self.get_active_preset_keys(),
                 "hud_summary": {
                     "drone1": self.get_hud_text(1),
                     "drone2": self.get_hud_text(2),

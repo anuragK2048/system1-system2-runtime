@@ -191,7 +191,7 @@ class TestSystem1L1Adaptive(unittest.TestCase):
         self.assertIn("gpt-oss", brain_groq.model)
 
         # Baseten provider
-        brain_baseten = System2Brain(provider="baseten")
+        brain_baseten = System2Brain(provider="baseten", api_key="dummy_baseten_key")
         self.assertEqual(brain_baseten.provider, "baseten")
         self.assertIn("muse-spark", brain_baseten.model)
 
