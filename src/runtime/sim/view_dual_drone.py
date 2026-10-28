@@ -120,7 +120,7 @@ def main() -> None:
         "--provider",
         type=str,
         default=None,
-        choices=["groq", "baseten", "openai"],
+        choices=["groq", "baseten", "fireworks", "openai"],
         help="Inference provider for System 2 LLM (default: groq or LLM_PROVIDER env)",
     )
     parser.add_argument(

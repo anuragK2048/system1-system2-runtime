@@ -825,6 +825,164 @@
 
     .patch-k { color: var(--text-muted); }
     .patch-v { color: var(--accent-purple); font-weight: 600; }
+
+    /* Active LLM Provider & Model Bar */
+    .llm-model-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      background: rgba(13, 17, 23, 0.85);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      margin-top: 2px;
+    }
+
+    .provider-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: rgba(188, 140, 255, 0.15);
+      border: 1px solid rgba(188, 140, 255, 0.4);
+      color: #D2A8FF;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+
+    .provider-pill.groq {
+      background: rgba(255, 123, 0, 0.15);
+      border-color: rgba(255, 123, 0, 0.4);
+      color: #FFA657;
+    }
+
+    .provider-pill.fireworks {
+      background: rgba(248, 81, 73, 0.15);
+      border-color: rgba(248, 81, 73, 0.4);
+      color: #FF7B72;
+    }
+
+    .provider-pill.openai {
+      background: rgba(0, 216, 246, 0.15);
+      border-color: rgba(0, 216, 246, 0.4);
+      color: var(--d2-cyan);
+    }
+
+    .provider-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      display: inline-block;
+    }
+
+    .model-name-pill {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: #FFFFFF;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .model-icon {
+      color: var(--accent-amber);
+      font-size: 9px;
+    }
+
+    /* Token & Credit Usage Ledger Card */
+    .token-usage-card {
+      background: var(--bg-darker);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      box-shadow: 0 0 12px rgba(0, 0, 0, 0.2);
+    }
+
+    .provider-usage-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .provider-usage-row {
+      background: rgba(22, 27, 34, 0.8);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 6px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }
+
+    .provider-usage-row:hover {
+      border-color: var(--border-focus);
+      background: rgba(22, 27, 34, 1.0);
+    }
+
+    .usage-prov-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 95px;
+    }
+
+    .usage-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .usage-dot.prov-baseten { background: #BC8CFF; box-shadow: 0 0 6px rgba(188, 140, 255, 0.4); }
+    .usage-dot.prov-groq { background: #FF7B00; box-shadow: 0 0 6px rgba(255, 123, 0, 0.4); }
+    .usage-dot.prov-fireworks { background: #F85149; box-shadow: 0 0 6px rgba(248, 81, 73, 0.4); }
+
+    .usage-prov-name {
+      font-size: 11px;
+      font-weight: 600;
+      color: #FFFFFF;
+    }
+
+    .usage-calls-badge {
+      font-size: 9px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      background: rgba(110, 118, 129, 0.15);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    .usage-tokens-data {
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+      font-family: var(--font-mono);
+      text-align: right;
+    }
+
+    .usage-token-total {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent-green);
+    }
+
+    .usage-token-sub {
+      font-size: 9px;
+      color: var(--text-dim);
+    }
   </style>
 </head>
 <body>
@@ -1179,6 +1337,18 @@
             </span>
           </div>
 
+          <!-- Active LLM Provider & Model Badge Bar -->
+          <div class="llm-model-bar" id="llmModelBar">
+            <div class="provider-pill groq" id="llmProviderPill">
+              <span class="provider-dot" id="llmProviderDot"></span>
+              <span id="llmProviderLabel">GROQ</span>
+            </div>
+            <div class="model-name-pill" id="llmModelPill" title="Active LLM Model">
+              <span class="model-icon">⚡</span>
+              <span id="llmModelLabel">qwen/qwen3.8-27b</span>
+            </div>
+          </div>
+
           <!-- Transaction Call Timeline & Exact Timestamps -->
           <div class="llm-timing-box">
             <div class="timing-row">
@@ -1200,6 +1370,55 @@
           <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase;">Latest Physical Diagnosis</div>
           <div class="llm-diagnosis" id="llmDiagText">
             "Nominal flight. All 4 rotors operating within hover envelope. No disturbance patches required."
+          </div>
+        </div>
+
+        <!-- Provider Token & Credit Usage Ledger -->
+        <div class="token-usage-card" id="tokenUsageCard">
+          <div class="section-title" style="margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+            <span>💳 Token & Credit Usage by Provider</span>
+            <span style="font-size: 9px; color: var(--text-dim); text-transform: none;" id="tokenLedgerUpdated">Synced</span>
+          </div>
+
+          <div class="provider-usage-grid">
+            <!-- Baseten Item -->
+            <div class="provider-usage-row" id="usageRowBaseten">
+              <div class="usage-prov-header">
+                <span class="usage-dot prov-baseten"></span>
+                <span class="usage-prov-name">Baseten</span>
+                <span class="usage-calls-badge" id="basetenCallsBadge">0 calls</span>
+              </div>
+              <div class="usage-tokens-data">
+                <span class="usage-token-total" id="basetenTotalTokens">0</span>
+                <span class="usage-token-sub">tokens (<span id="basetenPromptTokens">0</span> in / <span id="basetenCompletionTokens">0</span> out)</span>
+              </div>
+            </div>
+
+            <!-- Groq Item -->
+            <div class="provider-usage-row" id="usageRowGroq">
+              <div class="usage-prov-header">
+                <span class="usage-dot prov-groq"></span>
+                <span class="usage-prov-name">Groq</span>
+                <span class="usage-calls-badge" id="groqCallsBadge">0 calls</span>
+              </div>
+              <div class="usage-tokens-data">
+                <span class="usage-token-total" id="groqTotalTokens">0</span>
+                <span class="usage-token-sub">tokens (<span id="groqPromptTokens">0</span> in / <span id="groqCompletionTokens">0</span> out)</span>
+              </div>
+            </div>
+
+            <!-- Fireworks Item -->
+            <div class="provider-usage-row" id="usageRowFireworks">
+              <div class="usage-prov-header">
+                <span class="usage-dot prov-fireworks"></span>
+                <span class="usage-prov-name">Fireworks</span>
+                <span class="usage-calls-badge" id="fireworksCallsBadge">0 calls</span>
+              </div>
+              <div class="usage-tokens-data">
+                <span class="usage-token-total" id="fireworksTotalTokens">0</span>
+                <span class="usage-token-sub">tokens (<span id="fireworksPromptTokens">0</span> in / <span id="fireworksCompletionTokens">0</span> out)</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1331,6 +1550,106 @@
       };
     }
 
+    // Token & Credit Usage Ledger state
+    function updateTokenLedger(provs) {
+      if (!provs) return;
+      const b = provs.baseten || {};
+      const g = provs.groq || {};
+      const f = provs.fireworks || {};
+
+      // Baseten
+      const bCalls = document.getElementById("basetenCallsBadge");
+      if (bCalls) bCalls.textContent = `${b.total_calls || 0} calls`;
+      const bTot = document.getElementById("basetenTotalTokens");
+      if (bTot) bTot.textContent = (b.total_tokens || 0).toLocaleString();
+      const bIn = document.getElementById("basetenPromptTokens");
+      if (bIn) bIn.textContent = (b.prompt_tokens || 0).toLocaleString();
+      const bOut = document.getElementById("basetenCompletionTokens");
+      if (bOut) bOut.textContent = (b.completion_tokens || 0).toLocaleString();
+
+      // Groq
+      const gCalls = document.getElementById("groqCallsBadge");
+      if (gCalls) gCalls.textContent = `${g.total_calls || 0} calls`;
+      const gTot = document.getElementById("groqTotalTokens");
+      if (gTot) gTot.textContent = (g.total_tokens || 0).toLocaleString();
+      const gIn = document.getElementById("groqPromptTokens");
+      if (gIn) gIn.textContent = (g.prompt_tokens || 0).toLocaleString();
+      const gOut = document.getElementById("groqCompletionTokens");
+      if (gOut) gOut.textContent = (g.completion_tokens || 0).toLocaleString();
+
+      // Fireworks
+      const fCalls = document.getElementById("fireworksCallsBadge");
+      if (fCalls) fCalls.textContent = `${f.total_calls || 0} calls`;
+      const fTot = document.getElementById("fireworksTotalTokens");
+      if (fTot) fTot.textContent = (f.total_tokens || 0).toLocaleString();
+      const fIn = document.getElementById("fireworksPromptTokens");
+      if (fIn) fIn.textContent = (f.prompt_tokens || 0).toLocaleString();
+      const fOut = document.getElementById("fireworksCompletionTokens");
+      if (fOut) fOut.textContent = (f.completion_tokens || 0).toLocaleString();
+
+      const updatedTag = document.getElementById("tokenLedgerUpdated");
+      if (updatedTag) {
+        const total = ((b.total_tokens || 0) + (g.total_tokens || 0) + (f.total_tokens || 0)).toLocaleString();
+        updatedTag.textContent = `Total: ${total} tokens`;
+      }
+    }
+
+    // Console Logging Utilities for Developer Console
+    let _lastLoggedProvider = null;
+    let _lastLoggedModel = null;
+    function logLlmConfigToConsole(provider, model) {
+      if (!provider || !model) return;
+      if (_lastLoggedProvider === provider && _lastLoggedModel === model) return;
+      _lastLoggedProvider = provider;
+      _lastLoggedModel = model;
+      console.log(
+        `%c🤖 [ACTIVE LLM CONFIG] %cProvider: ${provider.toUpperCase()}%c | %cModel: ${model}`,
+        "background: #1F6FEB; color: #FFFFFF; font-weight: bold; padding: 2px 8px; border-radius: 4px;",
+        "background: #238636; color: #FFFFFF; font-weight: bold; padding: 2px 6px; border-radius: 4px;",
+        "color: #8B949E; font-weight: bold;",
+        "background: #8957E5; color: #FFFFFF; font-weight: bold; padding: 2px 6px; border-radius: 4px;"
+      );
+    }
+
+    let _lastLoggedUsageTimestamp = "";
+    function logUsageTableToConsole(usageData) {
+      if (!usageData || !usageData.providers) return;
+      const ts = usageData.last_updated_iso || "";
+      if (ts && ts === _lastLoggedUsageTimestamp) return;
+      _lastLoggedUsageTimestamp = ts;
+
+      const tableData = {};
+      for (const [p, u] of Object.entries(usageData.providers)) {
+        tableData[p.toUpperCase()] = {
+          "Calls (OK/Err)": `${u.total_calls} (${u.successful_calls}/${u.failed_calls})`,
+          "Prompt Tokens": (u.prompt_tokens || 0).toLocaleString(),
+          "Completion Tokens": (u.completion_tokens || 0).toLocaleString(),
+          "Total Tokens": (u.total_tokens || 0).toLocaleString(),
+          "Last Active": u.last_call_iso ? u.last_call_iso.substring(0, 19).replace("T", " ") : "Never"
+        };
+      }
+      const grandTot = (usageData.grand_total ? usageData.grand_total.total_tokens : 0) || 0;
+      console.groupCollapsed(
+        `%c💳 [LLM CREDIT & TOKEN USAGE BY PROVIDER] %cTotal Tokens: ${grandTot.toLocaleString()}`,
+        "color: #58A6FF; font-weight: bold;",
+        "color: #3FB950; font-weight: bold;"
+      );
+      console.table(tableData);
+      console.groupEnd();
+    }
+
+    function fetchProviderUsage() {
+      fetch('/api/bridge/provider_usage')
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.providers) {
+            updateTokenLedger(data.providers);
+            logUsageTableToConsole(data);
+          }
+        })
+        .catch(() => {});
+    }
+
     // Initial HTTP fetch to seed dashboard immediately
     fetch('/api/bridge/status')
       .then(r => r.json())
@@ -1342,14 +1661,37 @@
           if (s2.last_call_dispatched_at != null) callDispatchedTime = s2.last_call_dispatched_at;
           if (s2.last_call_received_at != null) callReceivedTime = s2.last_call_received_at;
           if (s2.patch_applied_time != null) patchAppliedTime = s2.patch_applied_time;
+
+          if (s2.provider) {
+            const pill = document.getElementById("llmProviderPill");
+            const lbl = document.getElementById("llmProviderLabel");
+            if (lbl) lbl.textContent = s2.provider.toUpperCase();
+            if (pill) pill.className = `provider-pill ${s2.provider.toLowerCase()}`;
+          }
+          if (s2.model) {
+            const modelLbl = document.getElementById("llmModelLabel");
+            if (modelLbl) modelLbl.textContent = s2.model;
+          }
+          if (s2.provider && s2.model) {
+            logLlmConfigToConsole(s2.provider, s2.model);
+          }
+        }
+        if (status.provider_usage && status.provider_usage.providers) {
+          updateTokenLedger(status.provider_usage.providers);
+          logUsageTableToConsole(status.provider_usage);
         }
         tickLiveTimers();
       })
       .catch(() => {});
 
+    // Periodic refresh of provider credit ledger (every 3s)
+    fetchProviderUsage();
+    setInterval(fetchProviderUsage, 3000);
+
     // =========================================================================
     // DASHBOARD RENDERER (Called at 30 Hz on WebSocket Frame)
     // =========================================================================
+    let _lastReportedCallTime = 0;
     function updateDashboard(data) {
       const d1 = data.drone1;
       const d2 = data.drone2;
@@ -1454,6 +1796,42 @@
         if (s2.last_call_dispatched_at != null) callDispatchedTime = s2.last_call_dispatched_at;
         if (s2.last_call_received_at != null) callReceivedTime = s2.last_call_received_at;
         if (s2.patch_applied_time != null && d2 && d2.active_patch) patchAppliedTime = s2.patch_applied_time;
+
+        // Update Provider & Model display
+        if (s2.provider) {
+          const pill = document.getElementById("llmProviderPill");
+          const lbl = document.getElementById("llmProviderLabel");
+          if (lbl) lbl.textContent = s2.provider.toUpperCase();
+          if (pill) pill.className = `provider-pill ${s2.provider.toLowerCase()}`;
+        }
+        if (s2.model) {
+          const modelLbl = document.getElementById("llmModelLabel");
+          if (modelLbl) modelLbl.textContent = s2.model;
+        }
+        if (s2.provider && s2.model) {
+          logLlmConfigToConsole(s2.provider, s2.model);
+        }
+
+        // Update token ledger if included in telemetry frame
+        if (s2.provider_usage && s2.provider_usage.providers) {
+          updateTokenLedger(s2.provider_usage.providers);
+        }
+
+        // Log to browser developer console on new LLM reasoner response
+        if (s2.last_call_received_at && s2.last_call_received_at !== _lastReportedCallTime) {
+          _lastReportedCallTime = s2.last_call_received_at;
+          const diag = (d2 && d2.active_patch) ? d2.active_patch.diagnosis : "Nominal flight";
+          console.log(
+            `%c🧠 [SYSTEM 2 LLM] %c${(s2.provider || 'baseten').toUpperCase()}%c | %c${s2.model || 'model'}%c | Latency: %c${(s2.last_latency_s || 0).toFixed(2)}s%c\nDiagnosis: "${diag}"`,
+            "color: #BC8CFF; font-weight: bold;",
+            "color: #00D8F6; font-weight: bold; background: #0D1117; padding: 2px 4px; border-radius: 3px;",
+            "color: #8B949E;",
+            "color: #FF7B00; font-weight: bold;",
+            "color: #8B949E;",
+            "color: #3FB950; font-weight: bold;",
+            "color: #F0F6FC;"
+          );
+        }
 
         const statusBadge = document.getElementById("llmStatusBadge");
         if (isInFlight) {
