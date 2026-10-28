@@ -154,7 +154,8 @@ class ChaosConfig:
     motor_failure_multiplier: float = 0.40
     
     # Chaos 2: Physical Swinging Payload
-    # Mass of payload bob is 0.35 kg (26% of drone weight) attached on a 0.25m tether
+    # Mass of payload bob is 0.35 kg (26% of drone weight) attached on a 0.22m tether
+    # (F4: matches the true tether length in assets/skydio_x2/x2.xml: fromto 0 0 0 0 0 -0.22, bob at z -0.22)
     payload_kick_angle_rad: float = 0.30   # Initial kick angle (~17 degrees)
     payload_kick_velocity: float = 1.5     # Initial kick angular speed (rad/s)
     

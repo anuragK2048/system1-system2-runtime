@@ -20,17 +20,23 @@ class FastTriggerEvent:
     force_residual_norm: float
     force_residual_vec: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     moment_residual_vec: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    # Timing correlation (set by the bridge when the active fault is known):
+    fault_type: Optional[str] = None  # e.g. "motor_failure", "wind_gust"
+    time_to_trigger_s: Optional[float] = None  # sim seconds from fault onset to this trigger
 
     def format_trigger_header(self) -> str:
         """Formats the trigger header for LLM prompts."""
         reasons_str = "; ".join(self.reasons)
         fx, fy, fz = self.force_residual_vec
         f_vec_str = f", F_dist=[{fx:+.1f},{fy:+.1f},{fz:+.1f}]N" if (abs(fx) > 0.5 or abs(fy) > 0.5 or abs(fz) > 0.5) else f", |F_dist|={self.force_residual_norm:.1f}N"
-        return (
+        header = (
             f"TRIGGER: {reasons_str} "
             f"(pos_err={self.pos_error_norm:.2f}m, tilt={self.tilt_deg:.1f}°, "
             f"|gyro|={self.gyro_norm:.2f}rad/s{f_vec_str})"
         )
+        if self.fault_type and self.time_to_trigger_s is not None:
+            header += f" [fault={self.fault_type}, time-to-trigger={self.time_to_trigger_s:.2f}s]"
+        return header
 
 
 @dataclass
@@ -118,7 +124,6 @@ class TelemetrySummary:
         lines.append(
             f"- External Disturbance Moment: Mx = {mx:+.3f}Nm, My = {my:+.3f}Nm, Mz = {mz:+.3f}Nm"
         )
-        return "\n".join(lines)
         return "\n".join(lines)
 
     def to_dict(self) -> Dict[str, object]:

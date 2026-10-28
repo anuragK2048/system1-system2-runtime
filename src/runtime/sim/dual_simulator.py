@@ -248,6 +248,10 @@ class DualDroneSimulator:
         Returns:
             Tuple of (telemetry_drone1, telemetry_drone2).
         """
+        # 0. Record fault on/off transitions for trigger timing correlation
+        self.bridge_1.note_fault_state(self.chaos.active_chaos, float(self.data.time))
+        self.bridge_2.note_fault_state(self.chaos.active_chaos, float(self.data.time))
+
         # 1. Update swinging cargo coupling for BOTH drones
         self.chaos.apply_payload_physics(
             self.model,

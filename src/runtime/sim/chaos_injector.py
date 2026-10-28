@@ -69,6 +69,8 @@ class ChaosManager:
             "wind_gust": False,        # Chaos 4: 5.0N lateral wind gust
         }
 
+        # F3: 0.0 = no gust latched; otherwise the time (same clock as the
+        # current_time passed to apply_wind_gust) when the gust expires.
         self.gust_end_time: float = 0.0
         self.reset_requested: bool = False
         self._was_payload_active: bool = False
@@ -82,7 +84,7 @@ class ChaosManager:
         print("  [Shift + 1] (or 6) 💥 CUT MOTOR 1 POWER BY 60%   (Chipped prop)")
         print("  [Shift + 2] (or 7) 📦 ATTACH SWINGING WEIGHT     (0.35kg red ball)")
         print("  [Shift + 3] (or 8) ⚡ INJECT SENSOR NOISE        (Gyro chatter)")
-        print("  [Shift + 4] (or 9) 💨 5.0N LATERAL WIND          (Toggle On/Off)")
+        print("  [Shift + 4] (or 9) 💨 5.0N WIND GUST (0.8s timed, press again to cancel)")
         print("  [Shift + 5] (or 0) 🔄 RESET DRONE                (Restore stable hover)")
         print("  [Spacebar]         ⏸  PAUSE / RESUME")
         print("-" * 70)
@@ -129,13 +131,20 @@ class ChaosManager:
             print(f"\n🚨 [CHAOS 3] Sensor Noise: {status}")
 
         # ----------------------------------------------------------------------
-        # Chaos 4: 5.0N Sustained Wind
+        # Chaos 4: 5.0N Timed Wind Gust
         # Triggered by: Shift + 4 ('$' = 36, or key 52 with Shift) OR key '9' (57)
         # ----------------------------------------------------------------------
         elif keycode == 36 or (keycode == 52 and shift) or keycode == 57:
-            self.active_chaos["wind_gust"] = not self.active_chaos["wind_gust"]
-            status = "🔴 ACTIVE (5.0N Crosswind pushing +X)" if self.active_chaos["wind_gust"] else "🟢 OFF (Calm air)"
-            print(f"\n💨 [CHAOS 4] Sustained Wind: {status}")
+            if self.active_chaos["wind_gust"]:
+                # Cancel the timed gust early (F3)
+                self.active_chaos["wind_gust"] = False
+                self.gust_end_time = 0.0
+                print("\n💨 [CHAOS 4] Wind Gust: 🟢 CANCELLED early (Calm air)")
+            else:
+                # Start a timed gust; end time latches on next apply_wind_gust (F3)
+                self.active_chaos["wind_gust"] = True
+                self.gust_end_time = 0.0
+                print(f"\n💨 [CHAOS 4] Wind Gust: 🔴 ACTIVE (5.0N pushing +X for {self.cfg.wind_gust_duration_seconds:.2f}s)")
 
         # ----------------------------------------------------------------------
         # Simulation Reset: Restore level hover and clear all anomalies
@@ -158,7 +167,26 @@ class ChaosManager:
         """Clears all active failure modes back to safe defaults."""
         for k in self.active_chaos:
             self.active_chaos[k] = False
+        self.gust_end_time = 0.0
         self._was_payload_active = False
+
+    def trigger_wind_gust(self, current_time: float) -> None:
+        """Starts a timed wind gust immediately (F3).
+
+        The gust stays active for `wind_gust_duration_seconds` and then turns
+        itself off inside apply_wind_gust. Toggling the flag off early (hotkey
+        or direct assignment + gust_end_time reset) still cancels it.
+
+        Args:
+            current_time: Now, on the same clock passed to apply_wind_gust
+                (wall time in the viewer loop, sim time in headless runs).
+        """
+        self.active_chaos["wind_gust"] = True
+        self.gust_end_time = current_time + self.cfg.wind_gust_duration_seconds
+        print(
+            f"\n💨 [CHAOS 4] Wind Gust: 🔴 ACTIVE "
+            f"(5.0N pushing +X for {self.cfg.wind_gust_duration_seconds:.2f}s)"
+        )
 
     # ==========================================================================
     # PHYSICS PERTURBATION APPLIERS
@@ -220,9 +248,25 @@ class ChaosManager:
         drone_body_id: int,
         current_time: float
     ) -> None:
-        """Applies external wind force to the drone body if active."""
+        """Applies the timed wind gust to the drone body while it is active (F3).
+
+        When the gust flag is on but no end time is latched yet
+        (gust_end_time <= 0, e.g. hotkey trigger or direct flag assignment),
+        the end time latches here as current_time + duration. Once
+        current_time passes the end time, the gust turns itself off.
+        """
         if self.active_chaos["wind_gust"]:
-            # Apply continuous lateral force along the world X axis
+            if self.gust_end_time <= 0.0:
+                # Just triggered: latch the expiry time on this clock.
+                self.gust_end_time = current_time + self.cfg.wind_gust_duration_seconds
+            elif current_time >= self.gust_end_time:
+                # Gust expired: switch it off (hotkey-off earlier also lands here
+                # cleanly since it clears both the flag and the end time).
+                self.active_chaos["wind_gust"] = False
+                self.gust_end_time = 0.0
+                print(f"\n💨 [CHAOS 4] Wind gust expired after {self.cfg.wind_gust_duration_seconds:.2f}s. Calm air.")
+                return
+            # Gust still active: apply lateral force along the world X axis
             data.xfrc_applied[drone_body_id, 0] = self.cfg.wind_gust_force_newtons
 
     def corrupt_sensor_data(self, omega: np.ndarray) -> np.ndarray:

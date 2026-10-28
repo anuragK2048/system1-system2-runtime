@@ -9,15 +9,20 @@ Implements:
 2. Fast Trigger detector (position error, attitude tilt, gyro rates, L1 innovation).
 3. Sliding window summarizer producing structured TelemetrySummary.
 4. Non-blocking patch repository for System 2 control adjustments.
+
+Time basis (unified, see timing fix item 3): ALL trigger times, cooldowns, and
+expiry windows in this bridge use MuJoCo SIM time (data.time), which is
+deterministic headless and matches wall time in the realtime viewer. Wall time
+is used only to measure LLM call latency itself. System2Worker cooldowns and
+patch ages likewise use sim timestamps from TelemetrySummary.
 """
 
-import time
 import threading
 from collections import deque
 from typing import Dict, List, Optional, Tuple, Deque
 import numpy as np
 
-from runtime.schemas.tier2 import System2Patch, GainMultipliers, SafetyEnvelope
+from runtime.schemas.tier2 import System2Patch, GainMultipliers, SafetyEnvelope, validate_patch
 from runtime.schemas.telemetry import FastTriggerEvent, TelemetrySummary
 
 
@@ -50,7 +55,8 @@ class System1System2Bridge:
 
         self._lock = threading.Lock()
         self._trigger_event = threading.Event()
-        self._last_trigger_time = 0.0
+        # Sim-time basis: last trigger's sim timestamp (NOT wall time).
+        self._last_trigger_sim_time = 0.0
 
         # Ring buffer storing dictionaries of sample points
         self._buffer: Deque[dict] = deque(maxlen=max_buffer_size)
@@ -60,6 +66,10 @@ class System1System2Bridge:
 
         # Active System 2 Patch applied to System 1
         self._active_patch: Optional[System2Patch] = None
+
+        # Fault onset tracking for timing logs: fault name -> sim start time.
+        self._fault_onsets: Dict[str, float] = {}
+        self._prev_fault_state: Dict[str, bool] = {}
 
     # ==========================================================================
     # SYSTEM 1 FAST INTERFACE (Called every 2 ms from 500 Hz loop)
@@ -147,8 +157,10 @@ class System1System2Bridge:
             self._buffer.append(sample)
 
             if is_triggered:
-                now = time.time()
-                if now - self._last_trigger_time >= self.trigger_cooldown_s:
+                # Sim-time cooldown (unified basis): deterministic headless and in
+                # the realtime viewer alike.
+                if sim_time - self._last_trigger_sim_time >= self.trigger_cooldown_s:
+                    fault_type, time_to_trigger = self._correlate_fault(sim_time)
                     event = FastTriggerEvent(
                         timestamp=sim_time,
                         reasons=reasons,
@@ -158,10 +170,18 @@ class System1System2Bridge:
                         force_residual_norm=force_res_norm,
                         force_residual_vec=[float(x) for x in sigma_f_hat],
                         moment_residual_vec=[float(x) for x in sigma_M_hat],
+                        fault_type=fault_type,
+                        time_to_trigger_s=time_to_trigger,
                     )
                     self._trigger_history.append(event)
                     self._trigger_event.set()
-                    self._last_trigger_time = now
+                    self._last_trigger_sim_time = sim_time
+                    fault_str = fault_type if fault_type else "unknown"
+                    ttt_str = f"{time_to_trigger:.2f}s" if time_to_trigger is not None else "unknown"
+                    print(
+                        f"⏱️ [TIMING] trigger t_sim={sim_time:.2f}s fault={fault_str} "
+                        f"time-to-trigger={ttt_str} reasons=[{'; '.join(reasons)}]"
+                    )
 
         return is_triggered, reasons
 
@@ -169,6 +189,42 @@ class System1System2Bridge:
         """Thread-safe retrieval of the currently active System 2 patch."""
         with self._lock:
             return self._active_patch
+
+    def note_fault_state(self, active_chaos: Dict[str, bool], sim_time: float) -> None:
+        """Records fault on/off transitions for trigger timing correlation.
+
+        Called every sim step by the simulator with the chaos manager's
+        active flags. When a fault turns on, its sim-time onset is stored so
+        later triggers can report time-to-trigger and the fault type.
+
+        Args:
+            active_chaos: Mapping of fault name -> active flag.
+            sim_time: Current MuJoCo sim time (data.time).
+        """
+        with self._lock:
+            for name, active in active_chaos.items():
+                was_active = self._prev_fault_state.get(name, False)
+                if active and not was_active:
+                    self._fault_onsets[name] = sim_time
+                self._prev_fault_state[name] = active
+
+    def _correlate_fault(self, sim_time: float) -> Tuple[Optional[str], Optional[float]]:
+        """Finds the most recently started active fault for a trigger.
+
+        Must be called with self._lock held. Returns (fault_type, onset age in
+        sim seconds), or (None, None) when no fault onset is known.
+        """
+        best_name: Optional[str] = None
+        best_onset: Optional[float] = None
+        for name, onset in self._fault_onsets.items():
+            if onset > sim_time:
+                continue
+            if best_onset is None or onset >= best_onset:
+                best_name = name
+                best_onset = onset
+        if best_name is None or best_onset is None:
+            return None, None
+        return best_name, sim_time - best_onset
 
     # ==========================================================================
     # SYSTEM 2 ASYNC INTERFACE (Called from LLM Reasoning thread)
@@ -188,8 +244,16 @@ class System1System2Bridge:
         """Clears the pending trigger event."""
         self._trigger_event.clear()
 
-    def get_latest_trigger_event(self, max_age_s: float = 2.0, current_time: Optional[float] = None) -> Optional[FastTriggerEvent]:
-        """Retrieves the most recent trigger event if recent."""
+    def get_latest_trigger_event(self, max_age_s: float = 3.0, current_time: Optional[float] = None) -> Optional[FastTriggerEvent]:
+        """Retrieves the most recent trigger event if recent.
+
+        Args:
+            max_age_s: Max event age in sim seconds. Default 3.0 s covers the
+                2.0 s System2Worker cooldown plus ~1.0 s of observed Groq LLM
+                latency margin, so a trigger that fired while the worker was
+                cooling down is still available when the worker reads it.
+            current_time: Current sim time; no expiry check when None.
+        """
         with self._lock:
             if not self._trigger_history:
                 return None
@@ -205,6 +269,9 @@ class System1System2Bridge:
             self._trigger_history.clear()
             self._trigger_event.clear()
             self._active_patch = None
+            self._last_trigger_sim_time = 0.0
+            self._fault_onsets.clear()
+            self._prev_fault_state.clear()
 
     def get_telemetry_summary(self, window_seconds: float = 1.0) -> TelemetrySummary:
         """Computes statistical telemetry summary over the sliding window.
@@ -317,9 +384,13 @@ class System1System2Bridge:
 
         Args:
             patch: System2Patch instance containing new feedforward, gains, trim, or envelope.
+                Validated (clamped or rejected) by tier2.validate_patch before storing.
+
+        Raises:
+            ValueError: If the patch has no diagnosis or non-numeric values.
         """
         with self._lock:
-            self._active_patch = patch
+            self._active_patch = validate_patch(patch)
 
     def clear_active_patch(self) -> None:
         """Removes the active patch, resetting System 1 to baseline."""
