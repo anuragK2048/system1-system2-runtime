@@ -19,6 +19,7 @@ from runtime.chaos.presets import (
     CHAOS_PRESETS,
     PRESET_ALIASES,
     get_preset_state,
+    get_preset_definition,
 )
 from runtime.chaos.manager import ChaosManager
 
@@ -33,4 +34,5 @@ __all__ = [
     "CHAOS_PRESETS",
     "PRESET_ALIASES",
     "get_preset_state",
+    "get_preset_definition",
 ]

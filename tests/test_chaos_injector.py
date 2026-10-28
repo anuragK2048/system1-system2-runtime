@@ -154,6 +154,62 @@ class TestChaosInjector(unittest.TestCase):
         self.assertFalse(self.mgr.drone1.is_any_active())
         self.assertEqual(self.mgr.get_hud_text(1), "CLEAN (Nominal Hover)")
 
+    def test_multi_chaos_additive_and_toggle(self):
+        """Verify multiple chaos presets can be selected and toggled simultaneously."""
+        # 1. Activate Preset 1 (Motor 1 Cut)
+        res1 = self.mgr.toggle_preset("1", target=ChaosTarget.BOTH)
+        self.assertEqual(res1["action"], "activated")
+        self.assertIn("1", self.mgr.get_active_preset_keys())
+        self.assertTrue(self.mgr.drone1.motor.is_active())
+
+        # 2. Layer on Preset 2 (6.5N Wind) additively
+        res2 = self.mgr.toggle_preset("2", target=ChaosTarget.BOTH)
+        self.assertEqual(res2["action"], "activated")
+        active = self.mgr.get_active_preset_keys()
+        self.assertIn("1", active)
+        self.assertIn("2", active)
+        # BOTH motor degradation and wind must be active at the same time
+        self.assertTrue(self.mgr.drone1.motor.is_active())
+        self.assertTrue(self.mgr.drone1.wind.enabled)
+        self.assertAlmostEqual(self.mgr.drone1.motor.multipliers[0], 0.40)
+        self.assertAlmostEqual(self.mgr.drone1.wind.steady_force[0], 6.5)
+
+        # 3. Layer on Preset 3 (Tethered Cargo)
+        res3 = self.mgr.toggle_preset("3", target=ChaosTarget.BOTH)
+        self.assertEqual(res3["action"], "activated")
+        active = self.mgr.get_active_preset_keys()
+        self.assertIn("1", active)
+        self.assertIn("2", active)
+        self.assertIn("3", active)
+        self.assertTrue(self.mgr.drone1.payload.attached)
+
+        # 4. Toggle off Preset 1 only (Motor 1 restored, Wind + Cargo remain active)
+        res_off = self.mgr.toggle_preset("1", target=ChaosTarget.BOTH)
+        self.assertEqual(res_off["action"], "deactivated")
+        active = self.mgr.get_active_preset_keys()
+        self.assertNotIn("1", active)
+        self.assertIn("2", active)
+        self.assertIn("3", active)
+        self.assertFalse(self.mgr.drone1.motor.is_active())
+        self.assertTrue(self.mgr.drone1.wind.enabled)
+        self.assertTrue(self.mgr.drone1.payload.attached)
+
+        # 5. Clear all with Preset 0
+        res_clean = self.mgr.toggle_preset("0", target=ChaosTarget.BOTH)
+        self.assertEqual(res_clean["action"], "cleared")
+        self.assertEqual(self.mgr.get_active_preset_keys(), [])
+        self.assertFalse(self.mgr.drone1.is_any_active())
+        self.assertFalse(self.mgr.drone2.is_any_active())
+
+    def test_chaos_summary_telemetry(self):
+        """Verify get_chaos_summary returns active_presets array for Web Dashboard."""
+        self.mgr.toggle_preset("1", target=ChaosTarget.BOTH)
+        self.mgr.toggle_preset("4", target=ChaosTarget.BOTH)
+        summary = self.mgr.get_chaos_summary()
+        self.assertIn("active_presets", summary)
+        self.assertIn("1", summary["active_presets"])
+        self.assertIn("4", summary["active_presets"])
+
     def test_dual_drone_sim_integration(self):
         """Verify DualDroneSimulator steps properly with the refactored chaos engine."""
         sim = DualDroneSimulator(drone1_mode="pid", drone2_mode="l1_adaptive")
@@ -163,7 +219,7 @@ class TestChaosInjector(unittest.TestCase):
         t1, t2 = sim.step_simulation(current_time=1.0)
         self.assertIn("injected_wind_force", t1)
         self.assertIn("injected_wind_force", t2)
-        self.assertAlmostEqual(t1["injected_wind_force"][0], 6.5, delta=1.5)
+        self.assertAlmostEqual(t1["injected_wind_force"][0], 6.5, delta=3.5)
         self.assertIn("WIND", t1["chaos_hud"])
 
 

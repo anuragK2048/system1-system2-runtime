@@ -179,6 +179,40 @@ class System2Brain:
                 f"Supported providers: 'groq', 'baseten', 'openai'."
             )
 
+        # Telemetry & observability fields
+        self.last_call_dispatched_at: Optional[float] = None
+        self.last_call_received_at: Optional[float] = None
+        self.last_latency_s: Optional[float] = None
+        self.in_flight: bool = False
+        self.call_count: int = 0
+        self._seed_latest_call_from_log()
+
+    def _seed_latest_call_from_log(self) -> None:
+        """Seeds latest call stats from log file so telemetry starts populated."""
+        try:
+            from pathlib import Path
+            log_p = Path(getattr(self.logger, "jsonl_path", "logs/llm_calls.jsonl"))
+            if not log_p.exists():
+                return
+            with open(log_p, "rb") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                if size == 0:
+                    return
+                f.seek(-min(size, 8192), 2)
+                lines = f.read().decode("utf-8", errors="ignore").strip().splitlines()
+                if not lines:
+                    return
+                last = json.loads(lines[-1])
+                duration = float(last.get("duration_s", 0.0))
+                ts_unix = float(last.get("timestamp_unix", 0.0))
+                if ts_unix > 0:
+                    self.last_latency_s = duration
+                    self.last_call_received_at = ts_unix
+                    self.last_call_dispatched_at = ts_unix - duration
+        except Exception:
+            pass
+
     def analyze_and_patch(
         self,
         summary: TelemetrySummary,
@@ -197,6 +231,9 @@ class System2Brain:
         user_prompt = summary.format_llm_text(trigger_header=trigger_header)
 
         start_t = time.time()
+        self.last_call_dispatched_at = start_t
+        self.in_flight = True
+
         prompt_tokens = 0
         completion_tokens = 0
         total_tokens = 0
@@ -220,6 +257,10 @@ class System2Brain:
 
             response = self.client.chat.completions.create(**call_kwargs)
             elapsed_s = time.time() - start_t
+            self.last_call_received_at = time.time()
+            self.last_latency_s = elapsed_s
+            self.in_flight = False
+            self.call_count += 1
 
             # Extract token usage if returned by endpoint
             if response.usage:
@@ -277,6 +318,10 @@ class System2Brain:
 
         except Exception as e:
             elapsed_s = time.time() - start_t
+            self.last_call_received_at = time.time()
+            self.last_latency_s = elapsed_s
+            self.in_flight = False
+            self.call_count += 1
             print(f"⚠️ [SYSTEM 2 LLM ERROR - {self.provider.upper()}] Failed to generate control patch: {e}")
 
             # Log failed transaction
@@ -360,6 +405,7 @@ class System2Worker:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._last_call_time = 0.0
+        self.worker_state: str = "IDLE"
 
     def start(self) -> None:
         """Launches the System 2 background monitoring thread."""
@@ -419,6 +465,7 @@ class System2Worker:
                         trigger_event = self.bridge.get_latest_trigger_event(max_age_s=2.0, current_time=summary.timestamp)
                         self.bridge.clear_trigger()
                         self._last_call_time = now
+                        self.worker_state = "REASONING"
 
                         # Query LLM asynchronously
                         patch = self.brain.analyze_and_patch(summary, trigger_event)
@@ -426,6 +473,7 @@ class System2Worker:
                             self.bridge.apply_system2_patch(patch)
                             self._patch_applied_time = now
                             self._patch_notified_stable = False
+                            self.worker_state = "PATCH_APPLIED"
                             print(f"\n✨ [SYSTEM 2 - {self.drone_name.upper()}] Applied Control Patch to System 1:")
                             print(f"   Diagnosis: {patch.diagnosis}")
                             if patch.feedforward_force_offset and any(abs(x) > 0.01 for x in patch.feedforward_force_offset):
@@ -434,6 +482,8 @@ class System2Worker:
                                  print(f"   Motor Trim: {patch.motor_trim_scale}")
                             if patch.gain_multipliers:
                                  print(f"   Gain Multipliers: {patch.gain_multipliers}\n")
+                        else:
+                            self.worker_state = "IDLE"
 
                 else:
                     # --------------------------------------------------------------
@@ -452,6 +502,7 @@ class System2Worker:
                     if calm_hover:
                         if (now - self._last_call_time) > 2.5:
                             self.bridge.clear_active_patch()
+                            self.worker_state = "IDLE"
                             print(f"\n🟢 [SYSTEM 2 - {self.drone_name.upper()}] Disturbance ended & flight nominal. Resetting System 1 control law to baseline.\n")
                             self._last_call_time = now
                             self._patch_notified_stable = False
@@ -461,6 +512,7 @@ class System2Worker:
                         if is_stable and not getattr(self, "_patch_notified_stable", False):
                             print(f"🎯 [SYSTEM 2 - {self.drone_name.upper()}] Active control patch holding flight stable against disturbance. Monitoring...\n")
                             self._patch_notified_stable = True
+                            self.worker_state = "STABLE"
 
                         # Only re-consult LLM if drone severely diverges or oscillates after 6.0 seconds
                         patch_age = now - getattr(self, "_patch_applied_time", now)
@@ -470,12 +522,16 @@ class System2Worker:
                             print(f"⚠️ [SYSTEM 2 - {self.drone_name.upper()}] Active patch insufficient; re-consulting LLM to revise control law...")
                             trigger_event = self.bridge.get_latest_trigger_event(max_age_s=2.0, current_time=summary.timestamp)
                             self._last_call_time = now
+                            self.worker_state = "REASONING"
                             revised_patch = self.brain.analyze_and_patch(summary, trigger_event)
                             if revised_patch:
                                 self.bridge.apply_system2_patch(revised_patch)
                                 self._patch_applied_time = now
+                                self.worker_state = "PATCH_APPLIED"
                                 print(f"\n🔄 [SYSTEM 2 - {self.drone_name.upper()}] Revised Control Patch:")
                                 print(f"   Diagnosis: {revised_patch.diagnosis}\n")
+                            else:
+                                self.worker_state = "STABLE"
 
             except Exception as e:
                 import traceback
@@ -483,6 +539,24 @@ class System2Worker:
                 traceback.print_exc()
 
             time.sleep(0.05)
+
+    def get_status_dict(self) -> Dict[str, Any]:
+        """Returns snapshot of System 2 LLM latency, timestamps, and patch lifecycle."""
+        patch_applied_t = self.bridge.get_patch_applied_time()
+        patch_age = self.bridge.get_patch_age_s()
+        return {
+            "drone_name": self.drone_name,
+            "provider": self.brain.provider,
+            "model": self.brain.model,
+            "worker_state": self.worker_state,
+            "in_flight": self.brain.in_flight,
+            "last_latency_s": round(self.brain.last_latency_s, 3) if self.brain.last_latency_s is not None else None,
+            "last_call_dispatched_at": self.brain.last_call_dispatched_at,
+            "last_call_received_at": self.brain.last_call_received_at,
+            "call_count": self.brain.call_count,
+            "patch_applied_time": patch_applied_t,
+            "patch_age_s": round(patch_age, 2) if patch_age is not None else None,
+        }
 
 
 def run_test() -> None:

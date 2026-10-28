@@ -145,9 +145,10 @@ def apply_payload_physics(
             data.qvel[qvel_adr] = cfg.kick_velocity
             kicked_set.add(payload_body_id)
 
-        # 2. Make tether (gold) and bob (red) visible
-        model.geom_rgba[tether_geom_id] = [1.0, 0.85, 0.10, 1.0]
-        model.geom_rgba[bob_geom_id] = [0.95, 0.15, 0.15, 1.0]
+        # 2. Make tether (gold) and bob (red) visible only when visibility changes
+        if model.geom_rgba[tether_geom_id, 3] < 0.5:
+            model.geom_rgba[tether_geom_id] = [1.0, 0.85, 0.10, 1.0]
+            model.geom_rgba[bob_geom_id] = [0.95, 0.15, 0.15, 1.0]
 
         # 3. Clear vertical counter-force so gravity pulls naturally
         data.xfrc_applied[payload_body_id, :] = 0.0
@@ -161,9 +162,10 @@ def apply_payload_physics(
     else:
         kicked_set.discard(payload_body_id)
 
-        # Make tether and bob invisible
-        model.geom_rgba[tether_geom_id] = [1.0, 0.85, 0.10, 0.0]
-        model.geom_rgba[bob_geom_id] = [0.95, 0.15, 0.15, 0.0]
+        # Make tether and bob invisible only when visibility changes
+        if model.geom_rgba[tether_geom_id, 3] > 0.5:
+            model.geom_rgba[tether_geom_id] = [1.0, 0.85, 0.10, 0.0]
+            model.geom_rgba[bob_geom_id] = [0.95, 0.15, 0.15, 0.0]
 
         # Neutralize payload weight so the drone feels exactly 0.00 kg
         data.xfrc_applied[payload_body_id, :] = 0.0

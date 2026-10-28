@@ -17,8 +17,19 @@ import numpy as np
 class ChaosTarget(str, Enum):
     """Specifies which drone(s) receive chaos injection."""
     BOTH = "both"
-    DRONE1 = "drone1"  # Left drone (Orange)
-    DRONE2 = "drone2"  # Right drone (Cyan)
+    DRONE2 = "drone2"  # Left drone (Cyan)
+    DRONE1 = "drone1"  # Right drone (Orange)
+
+
+@dataclass
+class ChaosConfig:
+    """Baseline parameters for simulated hardware failures and disturbances."""
+    motor_failure_multiplier: float = 0.40
+    payload_kick_angle_rad: float = 0.30
+    payload_kick_velocity: float = 1.5
+    sensor_noise_std: float = 0.8
+    wind_gust_force_newtons: float = 5.0
+    wind_gust_duration_seconds: float = 0.80
 
 
 @dataclass
@@ -43,6 +54,12 @@ class MotorChaosConfig:
         if self.chipped_motor_idx is not None:
             degraded.append(f"M{self.chipped_motor_idx+1}:CHIPPED")
         return ", ".join(degraded) if degraded else "Faulted"
+
+    def reset(self) -> None:
+        """Restores all motors to 100% nominal health."""
+        self.multipliers = [1.0, 1.0, 1.0, 1.0]
+        self.chipped_motor_idx = None
+        self.dropout_prob = 0.0
 
 
 @dataclass
@@ -79,6 +96,13 @@ class WindChaosConfig:
             parts.append(f"Turb:{self.turbulence_std:.1f}")
         return " ".join(parts) if parts else "Windy"
 
+    def reset(self) -> None:
+        """Restores wind to calm zero force."""
+        self.enabled = False
+        self.steady_force = [0.0, 0.0, 0.0]
+        self.turbulence_std = 0.0
+        self.gust_active = False
+
 
 @dataclass
 class PayloadChaosConfig:
@@ -102,6 +126,12 @@ class PayloadChaosConfig:
             return "Detached (0.00kg)"
         drag_str = "+WindDrag" if self.aerodynamic_drag_enabled else ""
         return f"{self.mass:.2f}kg Attached{drag_str}"
+
+    def reset(self) -> None:
+        """Detaches payload cargo."""
+        self.attached = False
+        self.mass = 0.35
+        self.aerodynamic_drag_enabled = True
 
 
 @dataclass
@@ -141,6 +171,15 @@ class SensorChaosConfig:
         if self.harmonic_amplitude > 0.0:
             items.append(f"Chirp:{self.harmonic_freq_hz:.0f}Hz")
         return ", ".join(items) if items else "Noisy"
+
+    def reset(self) -> None:
+        """Clears all sensor noise and bias drift."""
+        self.enabled = False
+        self.gyro_noise_std = 0.0
+        self.accel_noise_std = 0.0
+        self.gyro_bias = [0.0, 0.0, 0.0]
+        self.harmonic_freq_hz = 0.0
+        self.harmonic_amplitude = 0.0
 
 
 @dataclass

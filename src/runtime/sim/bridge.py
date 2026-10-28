@@ -60,6 +60,7 @@ class System1System2Bridge:
 
         # Active System 2 Patch applied to System 1
         self._active_patch: Optional[System2Patch] = None
+        self._patch_applied_time: Optional[float] = None
 
     # ==========================================================================
     # SYSTEM 1 FAST INTERFACE (Called every 2 ms from 500 Hz loop)
@@ -122,8 +123,9 @@ class System1System2Bridge:
                 f"L1 estimated disturbance force ({force_res_norm:.1f}N along {sign_str}{dominant_axis}) spiked above threshold ({self.force_residual_threshold:.1f}N)"
             )
 
-        # Ignore triggers during initial spawn ascent warmup
-        is_triggered = (len(reasons) > 0) and (sim_time >= 1.0)
+        # Ignore triggers during initial spawn ascent warmup or if drone has crashed on the ground
+        is_crashed = (pos[2] < 0.12 and tilt_deg > 60.0) or (pos[2] < 0.08)
+        is_triggered = (len(reasons) > 0) and (sim_time >= 1.0) and not is_crashed
 
         sample = {
             "time": sim_time,
@@ -205,6 +207,7 @@ class System1System2Bridge:
             self._trigger_history.clear()
             self._trigger_event.clear()
             self._active_patch = None
+            self._patch_applied_time = None
 
     def get_telemetry_summary(self, window_seconds: float = 1.0) -> TelemetrySummary:
         """Computes statistical telemetry summary over the sliding window.
@@ -320,8 +323,24 @@ class System1System2Bridge:
         """
         with self._lock:
             self._active_patch = patch
+            self._patch_applied_time = time.time()
 
     def clear_active_patch(self) -> None:
         """Removes the active patch, resetting System 1 to baseline."""
         with self._lock:
             self._active_patch = None
+            self._patch_applied_time = None
+
+    def get_patch_applied_time(self) -> Optional[float]:
+        """Returns unix timestamp when the currently active patch was applied, or None."""
+        with self._lock:
+            if self._active_patch is None:
+                return None
+            return self._patch_applied_time
+
+    def get_patch_age_s(self) -> Optional[float]:
+        """Returns elapsed seconds since the active patch was applied, or None if unpatched."""
+        with self._lock:
+            if self._active_patch is None or self._patch_applied_time is None:
+                return None
+            return max(0.0, time.time() - self._patch_applied_time)

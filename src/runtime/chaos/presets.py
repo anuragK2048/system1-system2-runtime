@@ -9,7 +9,7 @@ Provides pre-calibrated failure scenarios for reproducible evaluation:
 - Preset 0: Clear All / Pristine Hover
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from runtime.chaos.models import (
     DroneChaosState,
     MotorChaosConfig,
@@ -141,3 +141,11 @@ def get_preset_state(preset_key: str) -> DroneChaosState:
             harmonic_amplitude=p["sensor"].harmonic_amplitude,
         ),
     )
+
+
+def get_preset_definition(preset_key: str) -> Optional[Dict[str, Any]]:
+    """Returns preset dictionary or None if unrecognized."""
+    canonical_key = PRESET_ALIASES.get(str(preset_key).lower().strip())
+    if canonical_key:
+        return CHAOS_PRESETS.get(canonical_key)
+    return None

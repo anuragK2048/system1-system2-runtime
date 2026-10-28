@@ -52,7 +52,7 @@
     </body>
 
     <!-- =================================================================== -->
-    <!-- DRONE 1 (LEFT, Spawn Y = -1.2m) - ORANGE/RED ACCENTS                -->
+    <!-- DRONE 1 (SCREEN RIGHT, Spawn Y = -1.2m) - ORANGE/RED ACCENTS         -->
     <!-- =================================================================== -->
     <light name="spotlight1" mode="targetbodycom" target="d1_x2" pos="0 -2.2 2"/>
     <body name="d1_x2" pos="0 -1.2 0.1" childclass="x2">
@@ -89,7 +89,7 @@
     </body>
 
     <!-- =================================================================== -->
-    <!-- DRONE 2 (RIGHT, Spawn Y = +1.2m) - CYAN/BLUE ACCENTS                -->
+    <!-- DRONE 2 (SCREEN LEFT, Spawn Y = +1.2m) - CYAN/BLUE ACCENTS          -->
     <!-- =================================================================== -->
     <light name="spotlight2" mode="targetbodycom" target="d2_x2" pos="0 2.2 2"/>
     <body name="d2_x2" pos="0 1.2 0.1" childclass="x2">

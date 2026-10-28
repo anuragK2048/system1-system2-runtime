@@ -108,6 +108,68 @@ class TestDualDroneSim(unittest.TestCase):
         self.assertEqual(sim.bridge_1.get_active_patch().feedforward_force_offset, [-5.0, 0.0, 0.0])
         self.assertIsNone(sim.bridge_2.get_active_patch())
 
+    def test_drone_orientation_mapping(self):
+        """Verify spatial alignment: Drone 2 is Left (Cyan), Drone 1 is Right (Orange)."""
+        from runtime.sim.config import get_drone_orientation
+
+        d1 = get_drone_orientation(1)
+        self.assertEqual(d1["screen_side"], "Right")
+        self.assertEqual(d1["color_name"], "Orange")
+        self.assertEqual(d1["hex_color"], "#FF6B35")
+
+        d2 = get_drone_orientation(2)
+        self.assertEqual(d2["screen_side"], "Left")
+        self.assertEqual(d2["color_name"], "Cyan")
+        self.assertEqual(d2["hex_color"], "#00D8F6")
+
+    def test_system_naming_canonical_definitions(self):
+        """Verify canonical system naming hierarchy across all supported operating modes."""
+        from runtime.sim.config import get_system_naming
+
+        p = get_system_naming("pid")
+        self.assertEqual(p["system_name"], "System-1 (Classical PID)")
+        self.assertEqual(p["system1_type"], "Classical PID")
+        self.assertFalse(p["system2_enabled"])
+
+        l1 = get_system_naming("l1_adaptive")
+        self.assertEqual(l1["system_name"], "System-1 (L1 Adaptive - QuadLib)")
+        self.assertEqual(l1["system1_type"], "L1 Adaptive")
+        self.assertFalse(l1["system2_enabled"])
+
+        p2 = get_system_naming("pid+system2")
+        self.assertEqual(p2["system_name"], "System-1 (Classical PID) + System-2 (LLM Meta-Controller)")
+        self.assertTrue(p2["system2_enabled"])
+
+        l2 = get_system_naming("l1_adaptive+system2")
+        self.assertEqual(l2["system_name"], "System-1 (L1 Adaptive) + System-2 (LLM Meta-Controller)")
+        self.assertTrue(l2["system2_enabled"])
+
+    def test_bridge_crash_suppression(self):
+        """Verify bridge push_telemetry does not fire when drone is crashed on the ground."""
+        from runtime.sim.bridge import System1System2Bridge
+
+        bridge = System1System2Bridge()
+        pos_crashed = np.array([0.0, -1.2, 0.05])
+        vel = np.array([0.0, 0.0, 0.0])
+        quat_flipped = np.array([0.0, 1.0, 0.0, 0.0])  # 180 deg flipped
+        omega = np.array([0.0, 0.0, 0.0])
+        ctrl = np.array([0.0, 0.0, 0.0, 0.0])
+        target = np.array([0.0, -1.2, 1.0])
+
+        triggered, reasons = bridge.push_telemetry(
+            sim_time=2.0,
+            pos=pos_crashed,
+            vel=vel,
+            quat=quat_flipped,
+            omega=omega,
+            motor_ctrl=ctrl,
+            target_pos=target,
+            sigma_f_hat=np.zeros(3),
+            sigma_M_hat=np.zeros(3),
+        )
+        self.assertFalse(triggered)
+        self.assertFalse(bridge.is_triggered())
+
 
 if __name__ == "__main__":
     unittest.main()

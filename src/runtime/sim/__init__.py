@@ -15,6 +15,8 @@ from runtime.sim.config import (
     ChaosConfig,
     SCENE_PATH,
     DUAL_SCENE_PATH,
+    get_system_naming,
+    get_drone_orientation,
 )
 from runtime.sim.system1_controller import System1Controller
 from runtime.sim.chaos_injector import ChaosManager
@@ -35,4 +37,6 @@ __all__ = [
     "ChaosConfig",
     "SCENE_PATH",
     "DUAL_SCENE_PATH",
+    "get_system_naming",
+    "get_drone_orientation",
 ]
