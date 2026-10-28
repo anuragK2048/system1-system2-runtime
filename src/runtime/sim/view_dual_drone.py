@@ -154,7 +154,7 @@ def main() -> None:
         )
     else:
         # Default run configuration without prompt
-        d1_mode = "pid"
+        d1_mode = "l1_adaptive"
         d2_mode = "l1_adaptive+system2"
 
     provider_label = args.provider or "groq (default)"
