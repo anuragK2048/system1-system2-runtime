@@ -630,10 +630,10 @@ def l1_adaptive_control(previous_state: L1AdaptiveState,
                         dt: float,
                         vtilde_xy_scale: float = 1.0,
                         As_v: float = -5.0,
-                        As_W: float = -10.0,
+                        As_W: float = -20.0,
                         lpf1_cutoff_freq_force: float = 10.0,
                         lpf1_cutoff_freq_moment: float = 10.0,
-                        lpf2_cutoff_freq_moment: float = 2.0,
+                        lpf2_cutoff_freq_moment: float = 5.0,
                         mass: float = 0.62,
                         inertia: np.ndarray = None) -> L1AdaptiveState:
     """
@@ -644,6 +644,9 @@ def l1_adaptive_control(previous_state: L1AdaptiveState,
         in the next iteration to maintain adaptation history
     - Use "output_state.baseline_control + output_state.adaptive_control" 
         or call output_state.get_total_control() for final augmented control
+    - F6: default As_W (-20.0) and lpf2 cutoff (5.0 Hz) are aligned with
+        runtime.sim.config.L1Config so the duplicate defaults agree. Runtime
+        behaviour is unchanged: System1Controller passes explicit values.
     - Recommend using external enable flags to switch between baseline and adaptive control for safety during testing,
         e.g., "final_control = baseline_control + adaptive_enable * adaptive_control"
     

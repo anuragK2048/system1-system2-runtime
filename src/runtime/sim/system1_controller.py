@@ -42,6 +42,12 @@ from runtime.quadlib import (
 )
 
 
+# F7: default max tilt for the L1 / geometric path. Matches the SafetyEnvelope
+# default (25 deg) and is enforced even when no System 2 patch is active.
+# The PID path keeps its own 0.15 rad limit (PIDConfig.max_tilt_rad).
+L1_DEFAULT_MAX_TILT_DEG: float = 25.0
+
+
 class System1Controller:
     """Robust 500 Hz Reflex Controller with L1 Adaptive Augmentation for Skydio X2.
 
@@ -80,6 +86,15 @@ class System1Controller:
 
         # Physical constants
         self.mass = 1.325  # kg
+        # F8: inertia about body axes [Ixx, Iyy, Izz] in kg*m^2. No datasheet
+        # source is recorded; plausibility basis is a point-mass hand check from
+        # the XML geometry (4 x 0.25 kg rotors at x +/-0.14 m, y +/-0.18 m, plus
+        # the 0.325 kg body ellipsoid), which reproduces these three numbers
+        # within ~13% but in permuted axis order (physics gives Izz largest for
+        # a planar rotor layout, here Ixx is largest). The frame convention is
+        # therefore UNVERIFIED: do not change these values without a test.
+        # See tests/test_system1_l1.py::test_controller_inertia_matches_mujoco,
+        # which compares them against MuJoCo's computed body inertia.
         self.inertia = np.array([0.06071, 0.03647, 0.02541], dtype=np.float32)  # [Ixx, Iyy, Izz]
 
         # Inverse control allocation matrix (4x4)
@@ -214,16 +229,36 @@ class System1Controller:
         if active_ff is not None:
             acc_ff_ned = self._T @ (np.array(active_ff, dtype=np.float32) / self.mass)
 
-        setpoint = QuadrotorSetpoint(position=desired_pos_ned, acceleration=acc_ff_ned)
-
-        # ----------------------------------------------------------------------
-        # 3. Geometric Baseline Controller (SE(3) tracking)
-        # ----------------------------------------------------------------------
         effective_pos_gains = self.l1_cfg.pos_gains * np.array([pos_kp_mult, pos_kp_mult, pos_kp_mult], dtype=np.float32)
         effective_vel_gains = self.l1_cfg.vel_gains * np.array([pos_kd_mult, pos_kd_mult, pos_kd_mult], dtype=np.float32)
         effective_att_gains = self.l1_cfg.att_gains * np.array([att_kp_mult, att_kp_mult, att_kp_mult], dtype=np.float32)
         effective_ang_gains = self.l1_cfg.ang_gains * np.array([att_kd_mult, att_kd_mult, att_kd_mult], dtype=np.float32)
 
+        # ----------------------------------------------------------------------
+        # F7. L1 tilt limit: clamp the horizontal position demand so the
+        # steady-state tilt stays within the safety envelope. In steady state
+        # the geometric controller tilts atan(a_horiz / g) with
+        # a_horiz ~= kp_xy * err_xy, so |err_xy| <= g * tan(max_tilt) / kp_xy.
+        # Uses the patch envelope when present, else the 25 deg default above.
+        # (Velocity-error terms can add transient tilt beyond this bound.)
+        # ----------------------------------------------------------------------
+        max_tilt_deg = L1_DEFAULT_MAX_TILT_DEG
+        if (active_patch is not None and active_patch.safety_envelope is not None
+                and active_patch.safety_envelope.max_tilt_deg is not None):
+            max_tilt_deg = float(active_patch.safety_envelope.max_tilt_deg)
+        kp_xy = float(min(effective_pos_gains[0], effective_pos_gains[1]))
+        if kp_xy > 1e-6 and max_tilt_deg > 0.0:
+            max_err_xy = 9.81 * float(np.tan(np.radians(max_tilt_deg))) / kp_xy
+            err_xy = desired_pos_ned[:2] - pos_ned[:2]
+            err_xy_norm = float(np.linalg.norm(err_xy))
+            if err_xy_norm > max_err_xy:
+                desired_pos_ned[:2] = pos_ned[:2] + err_xy * (max_err_xy / err_xy_norm)
+
+        setpoint = QuadrotorSetpoint(position=desired_pos_ned, acceleration=acc_ff_ned)
+
+        # ----------------------------------------------------------------------
+        # 3. Geometric Baseline Controller (SE(3) tracking)
+        # ----------------------------------------------------------------------
         u_b = geometric_control(
             current_state=current_state,
             desired_setpoint=setpoint,
@@ -319,6 +354,7 @@ class System1Controller:
             "pitch_err": float(0.0 - np.radians(pitch_deg)),
             "target_roll": 0.0,
             "target_pitch": 0.0,
+            "l1_max_tilt_deg": float(max_tilt_deg),
             # L1 Adaptive Controller Metrics
             "u_b": [float(x) for x in u_b],
             "u_ad": [float(x) for x in u_ad],

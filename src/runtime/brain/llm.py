@@ -14,6 +14,10 @@ Architecture:
     * gain_multipliers: {pos_kp, pos_kd, att_kp, att_kd}
     * motor_trim_scale: [s1, s2, s3, s4]
     * safety_envelope: {max_tilt_deg}
+
+Time basis (unified): System2Worker cooldowns, patch ages, and trigger expiry all
+use MuJoCo SIM time from TelemetrySummary, matching the bridge. Wall time is used
+only for thread sleeps and measuring LLM call latency.
 """
 
 import os
@@ -35,6 +39,11 @@ from runtime.logging import LLMLogger, get_llm_logger
 load_dotenv()
 
 
+# F1 motor-trim physics: motor 1 at 40% power produces 0.40 x commanded thrust.
+# Full compensation needs a 1/0.40 = 2.5x trim on M1 (0.40 x 2.50 = 1.00, i.e.
+# hover 3.25 N x 2.50 = 8.1 N effective, under the 13 N per-motor limit), or
+# equivalently ~1.20x on the three healthy motors (missing 1.95 N / 3 = 0.65 N
+# each: 3.25 -> 3.90 N). The old prompt value 1.60x only restored 64% of M1.
 SYSTEM_PROMPT = """You are the System 2 Autonomous Flight Reasoner for a Skydio X2 quadrotor.
 CRITICAL INSTRUCTION: Output valid JSON immediately. Keep reasoning under 50 words.
 
@@ -48,7 +57,7 @@ Guidance on Control Levers:
   * Lateral wind: If external wind disturbance force is detected along X (Fx ≈ +5.0N or Fx ≈ -5.0N) or Y, or if position is drifting downwind, command opposing feedforward force offset: dFx = -Fx (e.g. if Fx ≈ +5.0N, command dFx = -5.0; if Fx ≈ -5.0N, command dFx = +5.0). This tilts the drone thrust vector into the wind to hold position at 0.0m. Do NOT dismiss persistent force as a false alarm.
   * Vertical: Keep dFz = 0.0 unless there is significant altitude loss (|dz| > 0.15m).
 - motor_trim_scale:
-  * Motor 1 Failure: If Motor 1 thrust is elevated (M1 > 5.0N vs others ~3.2N) or Motor 1 is degraded (40% power / moment disturbance), set motor_trim_scale: [1.60, 0.95, 0.95, 1.0] to boost M1 command and restore physical thrust symmetry.
+  * Motor 1 Failure: If Motor 1 thrust is elevated (M1 > 5.0N vs others ~3.2N) or Motor 1 is degraded (40% power / moment disturbance), set motor_trim_scale: [2.50, 1.0, 1.0, 1.0] to restore M1 effective thrust (0.40 x 2.50 = 1.00; hover 3.25N x 2.50 = 8.1N, still under the 13N limit). Alternative: [1.0, 1.20, 1.20, 1.20] spreads the missing ~1.95N over the three healthy motors (3.25 -> 3.90N each).
 - gain_multipliers:
   * Sensor Noise / Gyro Chatter: If gyro RMS > 1.0 rad/s, angular rate spikes, or oscillation is detected, set gain_multipliers: {"att_kp": 0.40, "att_kd": 1.6, "pos_kp": 1.0, "pos_kd": 1.0} to damp high-frequency vibration chatter.
   * If drifting sluggishly against wind, set pos_kp = 1.2 to 1.3.
@@ -204,6 +213,14 @@ class System2Brain:
         raw_text = None
         reasoning = None
 
+        # Timing metadata recorded into logs/llm_calls.jsonl for every call.
+        timing_metadata: Dict[str, Any] = {
+            "fault_type": trigger_event.fault_type if trigger_event else None,
+            "time_to_trigger_s": trigger_event.time_to_trigger_s if trigger_event else None,
+            "trigger_sim_time": trigger_event.timestamp if trigger_event else None,
+            "summary_sim_time": summary.timestamp,
+        }
+
         try:
             call_kwargs = {
                 "model": self.model,
@@ -267,6 +284,7 @@ class System2Brain:
                     "provider": self.provider,
                     "trigger_header": trigger_header,
                     "finish_reason": finish_reason,
+                    **timing_metadata,
                 },
             )
 
@@ -294,7 +312,7 @@ class System2Brain:
                 parsed_patch=None,
                 status="error",
                 error_message=str(e),
-                metadata={"provider": self.provider, "trigger_header": trigger_header},
+                metadata={"provider": self.provider, "trigger_header": trigger_header, **timing_metadata},
             )
             return None
 
@@ -340,7 +358,8 @@ class System2Worker:
     """Asynchronous background worker that monitors the bridge and triggers LLM reasoning.
 
     Runs in a separate daemon thread to ensure the 500 Hz physics simulation
-    never experiences any latency or blocking.
+    never experiences any latency or blocking. All cooldowns and patch ages use
+    sim time from TelemetrySummary (unified basis with the bridge).
     """
 
     def __init__(
@@ -354,12 +373,14 @@ class System2Worker:
     ) -> None:
         self.bridge = bridge
         self.brain = brain or System2Brain(provider=provider, model=model)
-        self.cooldown_s = cooldown_s
+        self.cooldown_s = cooldown_s  # sim seconds between LLM calls
         self.drone_name = drone_name
 
         self._running = False
         self._thread: Optional[threading.Thread] = None
-        self._last_call_time = 0.0
+        self._last_call_sim_time = 0.0
+        self._patch_applied_sim_time = 0.0
+        self._patch_notified_stable = False
 
     def start(self) -> None:
         """Launches the System 2 background monitoring thread."""
@@ -379,25 +400,51 @@ class System2Worker:
             self._thread = None
         print(f"🛑 [SYSTEM 2 - {self.drone_name.upper()}] Async Meta-Controller stopped.")
 
+    def _print_timing(
+        self,
+        trigger_event: Optional[FastTriggerEvent],
+        patch_sim_time: float,
+        llm_wall_s: float,
+    ) -> None:
+        """Prints one timing line per applied patch: fault, trigger, and patch latency."""
+        if trigger_event is not None:
+            time_to_patch = patch_sim_time - trigger_event.timestamp
+            fault = trigger_event.fault_type or "unknown"
+            ttt = trigger_event.time_to_trigger_s
+            ttt_str = f"{ttt:.2f}s" if ttt is not None else "unknown"
+            print(
+                f"⏱️ [TIMING - {self.drone_name.upper()}] fault={fault} "
+                f"time-to-trigger={ttt_str} time-to-patch={time_to_patch:.2f}s "
+                f"(LLM call took {llm_wall_s:.2f}s wall)"
+            )
+        else:
+            print(
+                f"⏱️ [TIMING - {self.drone_name.upper()}] fault=unknown (no trigger event) "
+                f"time-to-patch=n/a (LLM call took {llm_wall_s:.2f}s wall)"
+            )
+
     def _run_loop(self) -> None:
         """Main loop executed in background thread."""
         while self._running:
             try:
-                # Check if cooldown interval has passed before consuming triggers
-                now = time.time()
-                if (now - self._last_call_time) < self.cooldown_s:
-                    time.sleep(0.1)
-                    continue
-
+                # The 1.0 s summary is kept for the LLM prompt, but the decision
+                # to call uses the instant (50 ms) force estimate as well, so a
+                # fast fault does not wait for a full 1.0 s mean to build up.
                 summary = self.bridge.get_telemetry_summary(window_seconds=1.0)
-                
+
                 # Skip initial spawn warmup (first 1.0s of physics)
                 if summary.timestamp < 1.0 or summary.samples_count < 200:
                     time.sleep(0.1)
                     continue
 
+                # Cooldown between LLM calls, in sim seconds (unified basis).
+                if (summary.timestamp - self._last_call_sim_time) < self.cooldown_s:
+                    time.sleep(0.1)
+                    continue
+
                 pos_err_norm = (summary.pos_error[0]**2 + summary.pos_error[1]**2 + summary.pos_error[2]**2) ** 0.5
                 force_dist_norm = (summary.unmodeled_force_disturbance[0]**2 + summary.unmodeled_force_disturbance[1]**2 + summary.unmodeled_force_disturbance[2]**2) ** 0.5
+                instant_force_norm = (summary.instantaneous_force_disturbance[0]**2 + summary.instantaneous_force_disturbance[1]**2 + summary.instantaneous_force_disturbance[2]**2) ** 0.5
                 moment_dist_norm = (summary.unmodeled_moment_disturbance[0]**2 + summary.unmodeled_moment_disturbance[1]**2 + summary.unmodeled_moment_disturbance[2]**2) ** 0.5
                 triggered = self.bridge.is_triggered()
 
@@ -411,21 +458,25 @@ class System2Worker:
                         triggered
                         or pos_err_norm > 0.30
                         or force_dist_norm > 2.5
+                        or instant_force_norm > 2.5
                         or moment_dist_norm > 0.35
                         or summary.oscillation_detected
                     )
 
                     if needs_attention:
-                        trigger_event = self.bridge.get_latest_trigger_event(max_age_s=2.0, current_time=summary.timestamp)
+                        trigger_event = self.bridge.get_latest_trigger_event(max_age_s=3.0, current_time=summary.timestamp)
                         self.bridge.clear_trigger()
-                        self._last_call_time = now
+                        self._last_call_sim_time = summary.timestamp
 
                         # Query LLM asynchronously
+                        llm_start = time.time()
                         patch = self.brain.analyze_and_patch(summary, trigger_event)
+                        llm_wall_s = time.time() - llm_start
                         if patch:
                             self.bridge.apply_system2_patch(patch)
-                            self._patch_applied_time = now
+                            self._patch_applied_sim_time = summary.timestamp
                             self._patch_notified_stable = False
+                            self._print_timing(trigger_event, summary.timestamp, llm_wall_s)
                             print(f"\n✨ [SYSTEM 2 - {self.drone_name.upper()}] Applied Control Patch to System 1:")
                             print(f"   Diagnosis: {patch.diagnosis}")
                             if patch.feedforward_force_offset and any(abs(x) > 0.01 for x in patch.feedforward_force_offset):
@@ -450,30 +501,34 @@ class System2Worker:
                     )
 
                     if calm_hover:
-                        if (now - self._last_call_time) > 2.5:
+                        if (summary.timestamp - self._last_call_sim_time) > 2.5:
                             self.bridge.clear_active_patch()
                             print(f"\n🟢 [SYSTEM 2 - {self.drone_name.upper()}] Disturbance ended & flight nominal. Resetting System 1 control law to baseline.\n")
-                            self._last_call_time = now
+                            self._last_call_sim_time = summary.timestamp
                             self._patch_notified_stable = False
                     else:
                         # Disturbance is still active. Is the active patch holding flight stable?
                         is_stable = (pos_err_norm < 0.30) and not summary.oscillation_detected
-                        if is_stable and not getattr(self, "_patch_notified_stable", False):
+                        if is_stable and not self._patch_notified_stable:
                             print(f"🎯 [SYSTEM 2 - {self.drone_name.upper()}] Active control patch holding flight stable against disturbance. Monitoring...\n")
                             self._patch_notified_stable = True
 
-                        # Only re-consult LLM if drone severely diverges or oscillates after 6.0 seconds
-                        patch_age = now - getattr(self, "_patch_applied_time", now)
-                        severe_divergence = (pos_err_norm > 0.75) or (summary.oscillation_detected and patch_age > 4.0)
+                        # Re-check the patch at 2 s (not 6 s): if position error
+                        # is still > 0.5 m or oscillation continues, re-consult.
+                        patch_age = summary.timestamp - self._patch_applied_sim_time
+                        severe_divergence = (pos_err_norm > 0.5) or (summary.oscillation_detected and patch_age > 2.0)
 
-                        if severe_divergence and patch_age > 6.0:
+                        if severe_divergence and patch_age > 2.0:
                             print(f"⚠️ [SYSTEM 2 - {self.drone_name.upper()}] Active patch insufficient; re-consulting LLM to revise control law...")
-                            trigger_event = self.bridge.get_latest_trigger_event(max_age_s=2.0, current_time=summary.timestamp)
-                            self._last_call_time = now
+                            trigger_event = self.bridge.get_latest_trigger_event(max_age_s=3.0, current_time=summary.timestamp)
+                            self._last_call_sim_time = summary.timestamp
+                            llm_start = time.time()
                             revised_patch = self.brain.analyze_and_patch(summary, trigger_event)
+                            llm_wall_s = time.time() - llm_start
                             if revised_patch:
                                 self.bridge.apply_system2_patch(revised_patch)
-                                self._patch_applied_time = now
+                                self._patch_applied_sim_time = summary.timestamp
+                                self._print_timing(trigger_event, summary.timestamp, llm_wall_s)
                                 print(f"\n🔄 [SYSTEM 2 - {self.drone_name.upper()}] Revised Control Patch:")
                                 print(f"   Diagnosis: {revised_patch.diagnosis}\n")
 

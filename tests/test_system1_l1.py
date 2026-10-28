@@ -85,6 +85,26 @@ class TestSystem1L1Adaptive(unittest.TestCase):
         self.assertIn("sigma_M_hat", diag)
         self.assertIn("is_triggered", diag)
 
+    def test_controller_inertia_matches_mujoco(self):
+        """F8: controller inertia must match MuJoCo's computed body inertia (as a set).
+
+        MuJoCo reports principal-axis diagonal inertia; the controller's frame
+        convention is unverified (the values match a point-mass hand calculation
+        only up to axis permutation), so this compares sorted values within 25%
+        and logs both for inspection. It must NOT be tightened to direct
+        element-wise equality without resolving the frame convention first.
+        """
+        model = mujoco.MjModel.from_xml_path(str(SCENE_PATH))
+        body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "x2")
+        mj_inertia = np.asarray(model.body_inertia, dtype=float).reshape(model.nbody, 3)[body_id]
+        ctrl_inertia = np.asarray(self.controller.inertia, dtype=float)
+        print(f"\n[F8] controller inertia [Ixx,Iyy,Izz]: {ctrl_inertia}")
+        print(f"[F8] mujoco body_inertia diag: {mj_inertia}")
+        self.assertTrue(np.all(np.isfinite(ctrl_inertia)))
+        self.assertTrue(np.all(ctrl_inertia > 0.0))
+        for c, m in zip(sorted(ctrl_inertia.tolist()), sorted(mj_inertia.tolist())):
+            self.assertAlmostEqual(c, m, delta=0.25 * m)
+
     def test_system2_bridge_telemetry_summary(self):
         """Verify bridge records samples and computes structured TelemetrySummary."""
         target_pos = np.array([0.0, 0.0, 1.0])

@@ -124,6 +124,9 @@ class DroneSimulator:
         Returns:
             Dictionary containing state telemetry and controller diagnostics.
         """
+        # 0. Record fault on/off transitions for trigger timing correlation
+        self.bridge.note_fault_state(self.chaos.active_chaos, float(self.data.time))
+
         # 1. Update payload attachment / gravity neutralization
         self.chaos.apply_payload_physics(
             self.model,
