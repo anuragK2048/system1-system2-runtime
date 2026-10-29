@@ -124,6 +124,12 @@ class TestSystem1L1Adaptive(unittest.TestCase):
         self.assertIn("Position Error", llm_text)
         self.assertIn("External Disturbance Force", llm_text)
 
+        # Verify helper properties for crash/altitude/tilt checks
+        self.assertAlmostEqual(summary.estimated_altitude, 0.9, delta=0.05)
+        self.assertAlmostEqual(summary.pos_mean[2], 0.9, delta=0.05)
+        self.assertGreaterEqual(summary.tilt_deg, 0.0)
+        self.assertEqual(summary.tilt_deg, summary.tilt_deg_mean)
+
     def test_fast_trigger_mechanism(self):
         """Verify Fast Trigger fires when thresholds are exceeded."""
         target_pos = np.array([0.0, 0.0, 1.0])

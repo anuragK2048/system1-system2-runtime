@@ -1373,54 +1373,6 @@
           </div>
         </div>
 
-        <!-- Provider Token & Credit Usage Ledger -->
-        <div class="token-usage-card" id="tokenUsageCard">
-          <div class="section-title" style="margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-            <span>💳 Token & Credit Usage by Provider</span>
-            <span style="font-size: 9px; color: var(--text-dim); text-transform: none;" id="tokenLedgerUpdated">Synced</span>
-          </div>
-
-          <div class="provider-usage-grid">
-            <!-- Baseten Item -->
-            <div class="provider-usage-row" id="usageRowBaseten">
-              <div class="usage-prov-header">
-                <span class="usage-dot prov-baseten"></span>
-                <span class="usage-prov-name">Baseten</span>
-                <span class="usage-calls-badge" id="basetenCallsBadge">0 calls</span>
-              </div>
-              <div class="usage-tokens-data">
-                <span class="usage-token-total" id="basetenTotalTokens">0</span>
-                <span class="usage-token-sub">tokens (<span id="basetenPromptTokens">0</span> in / <span id="basetenCompletionTokens">0</span> out)</span>
-              </div>
-            </div>
-
-            <!-- Groq Item -->
-            <div class="provider-usage-row" id="usageRowGroq">
-              <div class="usage-prov-header">
-                <span class="usage-dot prov-groq"></span>
-                <span class="usage-prov-name">Groq</span>
-                <span class="usage-calls-badge" id="groqCallsBadge">0 calls</span>
-              </div>
-              <div class="usage-tokens-data">
-                <span class="usage-token-total" id="groqTotalTokens">0</span>
-                <span class="usage-token-sub">tokens (<span id="groqPromptTokens">0</span> in / <span id="groqCompletionTokens">0</span> out)</span>
-              </div>
-            </div>
-
-            <!-- Fireworks Item -->
-            <div class="provider-usage-row" id="usageRowFireworks">
-              <div class="usage-prov-header">
-                <span class="usage-dot prov-fireworks"></span>
-                <span class="usage-prov-name">Fireworks</span>
-                <span class="usage-calls-badge" id="fireworksCallsBadge">0 calls</span>
-              </div>
-              <div class="usage-tokens-data">
-                <span class="usage-token-total" id="fireworksTotalTokens">0</span>
-                <span class="usage-token-sub">tokens (<span id="fireworksPromptTokens">0</span> in / <span id="fireworksCompletionTokens">0</span> out)</span>
-              </div>
-            </div>
-          </div>
-        </div>
 
         <!-- Active Control Patch Diff -->
         <div>
@@ -1550,50 +1502,6 @@
       };
     }
 
-    // Token & Credit Usage Ledger state
-    function updateTokenLedger(provs) {
-      if (!provs) return;
-      const b = provs.baseten || {};
-      const g = provs.groq || {};
-      const f = provs.fireworks || {};
-
-      // Baseten
-      const bCalls = document.getElementById("basetenCallsBadge");
-      if (bCalls) bCalls.textContent = `${b.total_calls || 0} calls`;
-      const bTot = document.getElementById("basetenTotalTokens");
-      if (bTot) bTot.textContent = (b.total_tokens || 0).toLocaleString();
-      const bIn = document.getElementById("basetenPromptTokens");
-      if (bIn) bIn.textContent = (b.prompt_tokens || 0).toLocaleString();
-      const bOut = document.getElementById("basetenCompletionTokens");
-      if (bOut) bOut.textContent = (b.completion_tokens || 0).toLocaleString();
-
-      // Groq
-      const gCalls = document.getElementById("groqCallsBadge");
-      if (gCalls) gCalls.textContent = `${g.total_calls || 0} calls`;
-      const gTot = document.getElementById("groqTotalTokens");
-      if (gTot) gTot.textContent = (g.total_tokens || 0).toLocaleString();
-      const gIn = document.getElementById("groqPromptTokens");
-      if (gIn) gIn.textContent = (g.prompt_tokens || 0).toLocaleString();
-      const gOut = document.getElementById("groqCompletionTokens");
-      if (gOut) gOut.textContent = (g.completion_tokens || 0).toLocaleString();
-
-      // Fireworks
-      const fCalls = document.getElementById("fireworksCallsBadge");
-      if (fCalls) fCalls.textContent = `${f.total_calls || 0} calls`;
-      const fTot = document.getElementById("fireworksTotalTokens");
-      if (fTot) fTot.textContent = (f.total_tokens || 0).toLocaleString();
-      const fIn = document.getElementById("fireworksPromptTokens");
-      if (fIn) fIn.textContent = (f.prompt_tokens || 0).toLocaleString();
-      const fOut = document.getElementById("fireworksCompletionTokens");
-      if (fOut) fOut.textContent = (f.completion_tokens || 0).toLocaleString();
-
-      const updatedTag = document.getElementById("tokenLedgerUpdated");
-      if (updatedTag) {
-        const total = ((b.total_tokens || 0) + (g.total_tokens || 0) + (f.total_tokens || 0)).toLocaleString();
-        updatedTag.textContent = `Total: ${total} tokens`;
-      }
-    }
-
     // Console Logging Utilities for Developer Console
     let _lastLoggedProvider = null;
     let _lastLoggedModel = null;
@@ -1609,45 +1517,6 @@
         "color: #8B949E; font-weight: bold;",
         "background: #8957E5; color: #FFFFFF; font-weight: bold; padding: 2px 6px; border-radius: 4px;"
       );
-    }
-
-    let _lastLoggedUsageTimestamp = "";
-    function logUsageTableToConsole(usageData) {
-      if (!usageData || !usageData.providers) return;
-      const ts = usageData.last_updated_iso || "";
-      if (ts && ts === _lastLoggedUsageTimestamp) return;
-      _lastLoggedUsageTimestamp = ts;
-
-      const tableData = {};
-      for (const [p, u] of Object.entries(usageData.providers)) {
-        tableData[p.toUpperCase()] = {
-          "Calls (OK/Err)": `${u.total_calls} (${u.successful_calls}/${u.failed_calls})`,
-          "Prompt Tokens": (u.prompt_tokens || 0).toLocaleString(),
-          "Completion Tokens": (u.completion_tokens || 0).toLocaleString(),
-          "Total Tokens": (u.total_tokens || 0).toLocaleString(),
-          "Last Active": u.last_call_iso ? u.last_call_iso.substring(0, 19).replace("T", " ") : "Never"
-        };
-      }
-      const grandTot = (usageData.grand_total ? usageData.grand_total.total_tokens : 0) || 0;
-      console.groupCollapsed(
-        `%c💳 [LLM CREDIT & TOKEN USAGE BY PROVIDER] %cTotal Tokens: ${grandTot.toLocaleString()}`,
-        "color: #58A6FF; font-weight: bold;",
-        "color: #3FB950; font-weight: bold;"
-      );
-      console.table(tableData);
-      console.groupEnd();
-    }
-
-    function fetchProviderUsage() {
-      fetch('/api/bridge/provider_usage')
-        .then(r => r.json())
-        .then(data => {
-          if (data && data.providers) {
-            updateTokenLedger(data.providers);
-            logUsageTableToConsole(data);
-          }
-        })
-        .catch(() => {});
     }
 
     // Initial HTTP fetch to seed dashboard immediately
@@ -1676,17 +1545,9 @@
             logLlmConfigToConsole(s2.provider, s2.model);
           }
         }
-        if (status.provider_usage && status.provider_usage.providers) {
-          updateTokenLedger(status.provider_usage.providers);
-          logUsageTableToConsole(status.provider_usage);
-        }
         tickLiveTimers();
       })
       .catch(() => {});
-
-    // Periodic refresh of provider credit ledger (every 3s)
-    fetchProviderUsage();
-    setInterval(fetchProviderUsage, 3000);
 
     // =========================================================================
     // DASHBOARD RENDERER (Called at 30 Hz on WebSocket Frame)
@@ -1812,10 +1673,6 @@
           logLlmConfigToConsole(s2.provider, s2.model);
         }
 
-        // Update token ledger if included in telemetry frame
-        if (s2.provider_usage && s2.provider_usage.providers) {
-          updateTokenLedger(s2.provider_usage.providers);
-        }
 
         // Log to browser developer console on new LLM reasoner response
         if (s2.last_call_received_at && s2.last_call_received_at !== _lastReportedCallTime) {

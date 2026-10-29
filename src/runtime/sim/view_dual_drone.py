@@ -166,7 +166,7 @@ def main() -> None:
             args.drone2.lower() if args.drone2 else "l1_adaptive+system2", "l1_adaptive+system2"
         )
     else:
-        # Default run configuration without prompt
+        # Default run configuration: Drone 1 = Baseline L1 Adaptive, Drone 2 = L1 Adaptive + System 2 LLM
         d1_mode = "l1_adaptive"
         d2_mode = "l1_adaptive+system2"
 

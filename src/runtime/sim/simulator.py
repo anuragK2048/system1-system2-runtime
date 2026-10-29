@@ -182,6 +182,16 @@ class DroneSimulator:
         with mujoco.viewer.launch_passive(
             self.model, self.data, key_callback=self.chaos.handle_key
         ) as viewer:
+            # Hide side panels by default for clean split-screen viewing (press [Tab] in viewer to toggle)
+            if hasattr(viewer, "_get_sim"):
+                try:
+                    sim_obj = viewer._get_sim()
+                    if hasattr(sim_obj, "ui0_enable"):
+                        sim_obj.ui0_enable = 0
+                    if hasattr(sim_obj, "ui1_enable"):
+                        sim_obj.ui1_enable = 0
+                except Exception:
+                    pass
             # Configure auto-tracking camera to keep drone centered
             viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
             viewer.cam.trackbodyid = self.drone_body_id

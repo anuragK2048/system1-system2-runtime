@@ -124,7 +124,7 @@ class System1System2Bridge:
             )
 
         # Ignore triggers during initial spawn ascent warmup or if drone has crashed on the ground
-        is_crashed = (pos[2] < 0.12 and tilt_deg > 60.0) or (pos[2] < 0.08)
+        is_crashed = (pos[2] < 0.20) or (pos[2] < 0.40 and tilt_deg > 55.0) or (tilt_deg > 80.0) or (pos_err_norm > 4.5)
         is_triggered = (len(reasons) > 0) and (sim_time >= 1.0) and not is_crashed
 
         sample = {
