@@ -463,22 +463,33 @@ class ChaosManager:
         sim_time: float,
         payload_qpos_adr: int,
         payload_qvel_adr: int,
+        suppress_wind: bool = False,
     ) -> np.ndarray:
         """Applies 3D wind and payload coupling for a specific drone at 500 Hz.
 
+        Args:
+            suppress_wind: When True, skip applying wind to the drone airframe (and to
+                the payload bob). Used to prevent a crashed, grounded drone from
+                accumulating large contact impulses that destabilise the shared
+                MuJoCo constraint solver and corrupt the other drone's physics state.
+
         Returns:
-            The total 3D wind disturbance force vector applied to the drone body.
+            The total 3D wind disturbance force vector (computed but may not be applied
+            when suppress_wind is True).
         """
         state = self.drone1 if drone_idx == 1 else self.drone2
 
-        # 1. Compute 3D wind disturbance force
+        # 1. Compute 3D wind disturbance force (always compute for telemetry reporting)
         wind_force = compute_wind_force(state.wind, sim_time)
 
-        # 2. Apply wind force directly to drone airframe COM
-        if np.any(np.abs(wind_force) > 0.001):
+        # 2. Apply wind force directly to drone airframe COM (suppressed if drone is crashed)
+        if not suppress_wind and np.any(np.abs(wind_force) > 0.001):
             apply_wind_to_body(data, drone_body_id, wind_force)
 
-        # 3. Apply swinging payload coupling and wind aerodynamic drag on cargo bob
+        # 3. Apply swinging payload coupling and wind aerodynamic drag on cargo bob.
+        #    Pass zero wind to payload when suppressed so the bob isn't driven by wind
+        #    while the drone is crashed on the floor.
+        effective_wind_for_payload = np.zeros(3, dtype=np.float64) if suppress_wind else wind_force
         phys_apply_payload(
             model=model,
             data=data,
@@ -486,7 +497,7 @@ class ChaosManager:
             tether_geom_id=tether_geom_id,
             bob_geom_id=bob_geom_id,
             cfg=state.payload,
-            wind_force=wind_force,
+            wind_force=effective_wind_for_payload,
             kicked_set=self._kicked_payloads,
             qpos_adr=payload_qpos_adr,
             qvel_adr=payload_qvel_adr,

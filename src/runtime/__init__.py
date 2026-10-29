@@ -13,8 +13,10 @@ from runtime.config import (
     SimConfig,
     ChaosConfig,
 )
+from runtime import evals
 
 __all__ = [
+    "evals",
     "FastTriggerConfig",
     "TelemetrySummaryConfig",
     "PatchApplicationConfig",

@@ -1,0 +1,68 @@
+{
+  "trigger": {
+    "pos_error_threshold": 0.15,
+    "tilt_deg_threshold": 25.0,
+    "gyro_norm_threshold": 3.5,
+    "force_residual_threshold": 1.8,
+    "trigger_cooldown_s": 0.5,
+    "min_sim_time": 1.0,
+    "max_buffer_size": 1500
+  },
+  "telemetry": {
+    "window_seconds": 1.0,
+    "recent_instant_samples": 25,
+    "motor_saturation_min": 0.05,
+    "motor_saturation_max": 12.95,
+    "oscillation_min_freq_hz": 3.0,
+    "oscillation_min_gyro_rms": 2.0,
+    "include_instantaneous_force": true,
+    "include_active_patch": false
+  },
+  "patch": {
+    "ramp_duration_s": 0.0,
+    "patch_ttl_s": null,
+    "confidence_scaling": false,
+    "feedforward_clamp_min": -10.0,
+    "feedforward_clamp_max": 10.0,
+    "motor_trim_clamp_min": 0.0,
+    "motor_trim_clamp_max": 2.0,
+    "gain_multiplier_clamp_min": 0.1,
+    "gain_multiplier_clamp_max": 3.0,
+    "max_tilt_deg_clamp_min": 5.0,
+    "max_tilt_deg_clamp_max": 45.0
+  },
+  "inference": {
+    "provider": null,
+    "model": null,
+    "temperature": 0.2,
+    "groq_max_completion_tokens": 2048,
+    "general_max_tokens": 4096,
+    "timeout_s": 10.0,
+    "seed": null,
+    "system_prompt": null,
+    "enable_json_mode": false
+  },
+  "worker": {
+    "cooldown_s": 1.0,
+    "loop_poll_interval_s": 0.05,
+    "warmup_min_timestamp": 1.0,
+    "warmup_min_samples": 200,
+    "attention_pos_error": 0.3,
+    "attention_force_disturbance": 2.5,
+    "attention_moment_disturbance": 0.35,
+    "attention_oscillation": true,
+    "calm_pos_error": 0.15,
+    "calm_force_disturbance": 1.0,
+    "calm_moment_disturbance": 0.2,
+    "calm_min_settle_time_s": 2.5,
+    "reconsult_pos_error": 0.75,
+    "reconsult_oscillation_age_s": 4.0,
+    "reconsult_min_patch_age_s": 6.0,
+    "stable_pos_error": 0.3,
+    "crash_alt_min": 0.2,
+    "crash_tilt_near_ground_alt": 0.4,
+    "crash_tilt_near_ground_deg": 55.0,
+    "crash_tilt_extreme_deg": 80.0,
+    "crash_runaway_pos_error": 4.5
+  }
+}
