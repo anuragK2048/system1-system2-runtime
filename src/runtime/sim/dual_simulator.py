@@ -249,6 +249,10 @@ class DualDroneSimulator:
         self.controller_2.reset_l1_state()
         self.bridge_1.reset()
         self.bridge_2.reset()
+        if self.worker_1:
+            self.worker_1.worker_state = "IDLE"
+        if self.worker_2:
+            self.worker_2.worker_state = "IDLE"
 
     def step_simulation(self, current_time: float) -> Tuple[dict, dict]:
         """Executes a single 500 Hz simulation step for both drones.
@@ -376,12 +380,23 @@ class DualDroneSimulator:
             with mujoco.viewer.launch_passive(
                 self.model, self.data, key_callback=self.chaos.handle_key
             ) as viewer:
-                # Camera tracks the anchor between both drones
+                # Hide side panels by default for clean split-screen viewing (press [Tab] in viewer to toggle)
+                if hasattr(viewer, "_get_sim"):
+                    try:
+                        sim_obj = viewer._get_sim()
+                        if hasattr(sim_obj, "ui0_enable"):
+                            sim_obj.ui0_enable = 0
+                        if hasattr(sim_obj, "ui1_enable"):
+                            sim_obj.ui1_enable = 0
+                    except Exception:
+                        pass
+
+                # Camera tracks the anchor between both drones (Azimuth 0.0 frames Left=Cyan, Right=Orange side-by-side)
                 viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
                 viewer.cam.trackbodyid = self.anchor_body_id
-                viewer.cam.distance = 4.2
+                viewer.cam.distance = 4.5
                 viewer.cam.elevation = -12.0
-                viewer.cam.azimuth = 90.0
+                viewer.cam.azimuth = 0.0
 
                 physics_dt = self.sim_cfg.physics_timestep
                 render_interval = 1.0 / self.sim_cfg.render_fps
@@ -419,14 +434,14 @@ class DualDroneSimulator:
                     if now - last_render >= render_interval:
                         viewer.opt.geomgroup[0:3] = 1
 
-                        # Render in-viewer HUD text overlays (Left Drone on TOPLEFT, Right Drone on TOPRIGHT)
+                        # Render in-viewer HUD text overlays (One on TOP, one on BOTTOM to prevent collision on split-screen)
                         d2_name = get_system_naming(self.drone2_mode)["system_short"]
                         d1_name = get_system_naming(self.drone1_mode)["system_short"]
                         hud_d2 = f"Left [Cyan - {d2_name}]: {tele_2.get('chaos_hud', '')}"
                         hud_d1 = f"Right [Orange - {d1_name}]: {tele_1.get('chaos_hud', '')}"
                         viewer.set_texts([
                             (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_TOPLEFT, hud_d2, ""),
-                            (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_TOPRIGHT, hud_d1, ""),
+                            (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_BOTTOMLEFT, hud_d1, ""),
                         ])
 
                         viewer.sync()

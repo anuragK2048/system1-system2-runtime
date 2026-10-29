@@ -468,6 +468,30 @@ class System2Worker:
                 moment_dist_norm = (summary.unmodeled_moment_disturbance[0]**2 + summary.unmodeled_moment_disturbance[1]**2 + summary.unmodeled_moment_disturbance[2]**2) ** 0.5
                 triggered = self.bridge.is_triggered()
 
+                # --------------------------------------------------------------
+                # Crash Safety Guard: Stop System 2 calls immediately if drone crashed
+                # --------------------------------------------------------------
+                alt = float(1.0 - summary.pos_error[2])
+                tilt = float((summary.roll_deg**2 + summary.pitch_deg**2) ** 0.5)
+                is_crashed = (
+                    alt < 0.20  # On or near the ground (target hover = 1.0m, floor = 0.0m)
+                    or (alt < 0.40 and tilt > 55.0)  # Severe tilt near ground
+                    or tilt > 80.0  # Inverted / tumbling
+                    or pos_err_norm > 4.5  # Runaway departure
+                )
+
+                if is_crashed:
+                    if self.worker_state != "CRASHED":
+                        self.worker_state = "CRASHED"
+                        print(f"\n💥 [SYSTEM 2 - {self.drone_name.upper()}] Drone crash / ground contact detected (Alt={alt:.2f}m, Tilt={tilt:.1f}°). Halting System 2 reasoning calls.")
+                    self.bridge.clear_trigger()
+                    time.sleep(0.4)
+                    continue
+                elif self.worker_state == "CRASHED":
+                    # Drone recovered / user reset simulation back into hover
+                    self.worker_state = "IDLE"
+                    print(f"🔄 [SYSTEM 2 - {self.drone_name.upper()}] Drone recovered to nominal hover envelope. Resuming System 2 monitoring.\n")
+
                 active_patch = self.bridge.get_active_patch()
 
                 if active_patch is None:
