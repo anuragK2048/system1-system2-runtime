@@ -267,21 +267,47 @@ class DualDroneSimulator:
         if self.worker_2:
             self.worker_2.worker_state = "IDLE"
 
+        # Clear the kicked-payloads set so payloads receive their initial swing kick
+        # again after reset (previously this was only cleared by ChaosManager.clear_all,
+        # causing payloads to start with zero angle/velocity after a mid-run reset).
+        self.chaos._kicked_payloads.clear()
+
     def step_simulation(self, current_time: float) -> Tuple[dict, dict]:
         """Executes a single 500 Hz simulation step for both drones.
 
         Returns:
             Tuple of (telemetry_drone1, telemetry_drone2).
         """
-        # 1. Reset applied body forces and generalized forces
+        # 1. Reset applied body forces and generalized forces (drone bodies + payload bodies)
         self.data.xfrc_applied[self.d1_body_id, :] = 0.0
         self.data.xfrc_applied[self.d2_body_id, :] = 0.0
+        self.data.xfrc_applied[self.d1_payload_id, :] = 0.0
+        self.data.xfrc_applied[self.d2_payload_id, :] = 0.0
         self.data.qfrc_applied[:] = 0.0
 
         sim_time = float(self.data.time)
         dt = self.sim_cfg.physics_timestep
 
-        # 2. Apply physics perturbations (3D wind + payload aerodynamic drag) for Drone 1 & 2
+        # 2. Read state BEFORE applying perturbations so crash disarm can gate wind on crashed drones
+        pos_1_pre = self.data.qpos[self.d1_qpos_adr : self.d1_qpos_adr + 3].copy()
+        quat_1_pre = self.data.qpos[self.d1_qpos_adr + 3 : self.d1_qpos_adr + 7].copy()
+        pos_2_pre = self.data.qpos[self.d2_qpos_adr : self.d2_qpos_adr + 3].copy()
+        quat_2_pre = self.data.qpos[self.d2_qpos_adr + 3 : self.d2_qpos_adr + 7].copy()
+
+        # Determine which drones are currently crashed / disarmed so wind is suppressed on them.
+        # This prevents a crashed drone with persistent wind from generating large contact impulses
+        # that can numerically destabilise the shared MuJoCo constraint solver and corrupt the
+        # hovering drone's physics state (root cause of the D1-crash → D2-falls-down bug).
+        def _is_crashed(pos: np.ndarray, quat: np.ndarray) -> bool:
+            qx, qy = quat[1], quat[2]
+            tilt = float(np.degrees(np.arccos(np.clip(1.0 - 2.0 * (qx**2 + qy**2), -1.0, 1.0))))
+            return (pos[2] < 0.12) or (pos[2] < 0.35 and tilt > 50.0) or (tilt > 85.0)
+
+        d1_crashed = _is_crashed(pos_1_pre, quat_1_pre)
+        d2_crashed = _is_crashed(pos_2_pre, quat_2_pre)
+
+        # 3. Apply physics perturbations (3D wind + payload aerodynamic drag) for Drone 1 & 2.
+        #    Skip wind application on any crashed drone to avoid destabilising contact impulses.
         wind_f1 = self.chaos.apply_drone_physics(
             drone_idx=1,
             model=self.model,
@@ -293,6 +319,7 @@ class DualDroneSimulator:
             sim_time=sim_time,
             payload_qpos_adr=self.d1_payload_qpos_adr,
             payload_qvel_adr=self.d1_payload_dof_adr,
+            suppress_wind=d1_crashed,
         )
         wind_f2 = self.chaos.apply_drone_physics(
             drone_idx=2,
@@ -305,23 +332,24 @@ class DualDroneSimulator:
             sim_time=sim_time,
             payload_qpos_adr=self.d2_payload_qpos_adr,
             payload_qvel_adr=self.d2_payload_dof_adr,
+            suppress_wind=d2_crashed,
         )
 
-        # 3. Read sensory state for Drone 1 (with sensor noise/vibrations)
+        # 4. Read sensory state for Drone 1 (with sensor noise/vibrations)
         pos_1 = self.data.qpos[self.d1_qpos_adr : self.d1_qpos_adr + 3].copy()
         vel_1 = self.data.qvel[self.d1_dof_adr : self.d1_dof_adr + 3].copy()
         quat_1 = self.data.qpos[self.d1_qpos_adr + 3 : self.d1_qpos_adr + 7].copy()
         raw_omega_1 = self.data.sensordata[self.d1_gyro_adr : self.d1_gyro_adr + 3].copy()
         omega_1 = self.chaos.corrupt_sensors_for_drone(1, raw_omega_1, sim_time=sim_time)
 
-        # 4. Read sensory state for Drone 2 (with sensor noise/vibrations)
+        # 5. Read sensory state for Drone 2 (with sensor noise/vibrations)
         pos_2 = self.data.qpos[self.d2_qpos_adr : self.d2_qpos_adr + 3].copy()
         vel_2 = self.data.qvel[self.d2_dof_adr : self.d2_dof_adr + 3].copy()
         quat_2 = self.data.qpos[self.d2_qpos_adr + 3 : self.d2_qpos_adr + 7].copy()
         raw_omega_2 = self.data.sensordata[self.d2_gyro_adr : self.d2_gyro_adr + 3].copy()
         omega_2 = self.chaos.corrupt_sensors_for_drone(2, raw_omega_2, sim_time=sim_time)
 
-        # 5. Compute System 1 motor demands independently
+        # 6. Compute System 1 motor demands independently
         thrust_1, diag_1 = self.controller_1.compute_motor_thrusts(
             pos_1, vel_1, quat_1, omega_1, sim_time=sim_time, dt=dt, target_pos=self.d1_target
         )
@@ -329,7 +357,7 @@ class DualDroneSimulator:
             pos_2, vel_2, quat_2, omega_2, sim_time=sim_time, dt=dt, target_pos=self.d2_target
         )
 
-        # 6. Apply hardware failure / motor degradation per drone
+        # 7. Apply hardware failure / motor degradation per drone
         actual_thrust_1 = self.chaos.degrade_actuators_for_drone(1, thrust_1, sim_time=sim_time)
         actual_thrust_2 = self.chaos.degrade_actuators_for_drone(2, thrust_2, sim_time=sim_time)
 
@@ -337,6 +365,7 @@ class DualDroneSimulator:
         # Automatic Crash Disarm: Cut motor thrust to 0 upon ground contact or tumble.
         # Prevents high-RPM rotors from driving inverted into the floor, eliminating
         # contact impulse spikes and QACC warnings in MUJOCO_LOG.TXT.
+        # Uses pre-step positions (already computed above for wind suppression gate).
         # ----------------------------------------------------------------------
         qx1, qy1 = quat_1[1], quat_1[2]
         tilt_deg_1 = float(np.degrees(np.arccos(np.clip(1.0 - 2.0 * (qx1**2 + qy1**2), -1.0, 1.0))))
