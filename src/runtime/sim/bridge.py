@@ -19,41 +19,67 @@ import numpy as np
 
 from runtime.schemas.tier2 import System2Patch, GainMultipliers, SafetyEnvelope
 from runtime.schemas.telemetry import FastTriggerEvent, TelemetrySummary
+from runtime.config.system2_config import (
+    FastTriggerConfig,
+    TelemetrySummaryConfig,
+    PatchApplicationConfig,
+)
 
 
 class System1System2Bridge:
     """Thread-safe real-time communication bridge between System 1 and System 2.
 
     Attributes:
-        max_buffer_size: Maximum number of 500 Hz telemetry samples stored (default: 1000 = 2.0s).
-        pos_error_threshold: Trigger limit for position error in meters (default: 0.30m).
-        tilt_deg_threshold: Trigger limit for tilt angle in degrees (default: 25.0°).
-        gyro_norm_threshold: Trigger limit for angular velocity norm in rad/s (default: 3.5 rad/s).
-        force_residual_threshold: Trigger limit for L1 force disturbance in Newtons (default: 3.0N).
+        trigger_cfg (FastTriggerConfig): Thresholds and cooldowns for Fast Trigger events.
+        telemetry_cfg (TelemetrySummaryConfig): Sliding-window parameters for LLM telemetry.
+        patch_cfg (PatchApplicationConfig): Hot-swap apply parameters, bounds, and TTL.
     """
 
     def __init__(
         self,
-        max_buffer_size: int = 1500,  # 3.0 seconds at 500 Hz
-        pos_error_threshold: float = 0.30,
-        tilt_deg_threshold: float = 25.0,
-        gyro_norm_threshold: float = 3.5,
-        force_residual_threshold: float = 3.0,
-        trigger_cooldown_s: float = 0.5,
+        max_buffer_size: Optional[int] = None,
+        pos_error_threshold: Optional[float] = None,
+        tilt_deg_threshold: Optional[float] = None,
+        gyro_norm_threshold: Optional[float] = None,
+        force_residual_threshold: Optional[float] = None,
+        trigger_cooldown_s: Optional[float] = None,
+        trigger_cfg: Optional[FastTriggerConfig] = None,
+        telemetry_cfg: Optional[TelemetrySummaryConfig] = None,
+        patch_cfg: Optional[PatchApplicationConfig] = None,
     ) -> None:
-        self.max_buffer_size = max_buffer_size
-        self.pos_error_threshold = pos_error_threshold
-        self.tilt_deg_threshold = tilt_deg_threshold
-        self.gyro_norm_threshold = gyro_norm_threshold
-        self.force_residual_threshold = force_residual_threshold
-        self.trigger_cooldown_s = trigger_cooldown_s
+        # Initialize sub-configs
+        self.trigger_cfg = trigger_cfg or FastTriggerConfig()
+        self.telemetry_cfg = telemetry_cfg or TelemetrySummaryConfig()
+        self.patch_cfg = patch_cfg or PatchApplicationConfig()
+
+        # Apply legacy positional/keyword overrides if provided
+        if max_buffer_size is not None:
+            self.trigger_cfg.max_buffer_size = max_buffer_size
+        if pos_error_threshold is not None:
+            self.trigger_cfg.pos_error_threshold = pos_error_threshold
+        if tilt_deg_threshold is not None:
+            self.trigger_cfg.tilt_deg_threshold = tilt_deg_threshold
+        if gyro_norm_threshold is not None:
+            self.trigger_cfg.gyro_norm_threshold = gyro_norm_threshold
+        if force_residual_threshold is not None:
+            self.trigger_cfg.force_residual_threshold = force_residual_threshold
+        if trigger_cooldown_s is not None:
+            self.trigger_cfg.trigger_cooldown_s = trigger_cooldown_s
+
+        # Convenience aliases for direct backward-compatibility
+        self.max_buffer_size = self.trigger_cfg.max_buffer_size
+        self.pos_error_threshold = self.trigger_cfg.pos_error_threshold
+        self.tilt_deg_threshold = self.trigger_cfg.tilt_deg_threshold
+        self.gyro_norm_threshold = self.trigger_cfg.gyro_norm_threshold
+        self.force_residual_threshold = self.trigger_cfg.force_residual_threshold
+        self.trigger_cooldown_s = self.trigger_cfg.trigger_cooldown_s
 
         self._lock = threading.Lock()
         self._trigger_event = threading.Event()
         self._last_trigger_time = 0.0
 
         # Ring buffer storing dictionaries of sample points
-        self._buffer: Deque[dict] = deque(maxlen=max_buffer_size)
+        self._buffer: Deque[dict] = deque(maxlen=self.trigger_cfg.max_buffer_size)
 
         # Trigger event history queue (up to 50 events)
         self._trigger_history: Deque[FastTriggerEvent] = deque(maxlen=50)
@@ -125,7 +151,7 @@ class System1System2Bridge:
 
         # Ignore triggers during initial spawn ascent warmup or if drone has crashed on the ground
         is_crashed = (pos[2] < 0.20) or (pos[2] < 0.40 and tilt_deg > 55.0) or (tilt_deg > 80.0) or (pos_err_norm > 4.5)
-        is_triggered = (len(reasons) > 0) and (sim_time >= 1.0) and not is_crashed
+        is_triggered = (len(reasons) > 0) and (sim_time >= self.trigger_cfg.min_sim_time) and not is_crashed
 
         sample = {
             "time": sim_time,
@@ -168,8 +194,13 @@ class System1System2Bridge:
         return is_triggered, reasons
 
     def get_active_patch(self) -> Optional[System2Patch]:
-        """Thread-safe retrieval of the currently active System 2 patch."""
+        """Thread-safe retrieval of the currently active System 2 patch (honoring TTL expiration)."""
         with self._lock:
+            if self._active_patch is not None and self.patch_cfg.patch_ttl_s is not None:
+                if self._patch_applied_time is not None:
+                    if (time.time() - self._patch_applied_time) > self.patch_cfg.patch_ttl_s:
+                        self._active_patch = None
+                        self._patch_applied_time = None
             return self._active_patch
 
     # ==========================================================================
@@ -209,21 +240,23 @@ class System1System2Bridge:
             self._active_patch = None
             self._patch_applied_time = None
 
-    def get_telemetry_summary(self, window_seconds: float = 1.0) -> TelemetrySummary:
+    def get_telemetry_summary(self, window_seconds: Optional[float] = None) -> TelemetrySummary:
         """Computes statistical telemetry summary over the sliding window.
 
         Args:
-            window_seconds: Window length in seconds (default: 1.0s).
+            window_seconds: Window length in seconds (defaults to self.telemetry_cfg.window_seconds).
 
         Returns:
             TelemetrySummary object with ready-to-prompt physical metrics.
         """
+        win_s = float(window_seconds if window_seconds is not None else self.telemetry_cfg.window_seconds)
+
         with self._lock:
             if not self._buffer:
                 # Return empty summary if buffer is blank
                 return TelemetrySummary(
                     timestamp=0.0,
-                    window_duration_s=window_seconds,
+                    window_duration_s=win_s,
                     samples_count=0,
                     roll_deg=0.0,
                     pitch_deg=0.0,
@@ -241,7 +274,7 @@ class System1System2Bridge:
 
             # Filter samples within the window
             latest_time = self._buffer[-1]["time"]
-            window_start = latest_time - window_seconds
+            window_start = latest_time - win_s
             samples = [s for s in self._buffer if s["time"] >= window_start]
 
             if not samples:
@@ -265,12 +298,14 @@ class System1System2Bridge:
         pitch_freq = (pitch_sign_flips / 2.0) / duration
         roll_freq = (roll_sign_flips / 2.0) / duration
 
+        osc_freq_thresh = self.telemetry_cfg.oscillation_min_freq_hz
+        osc_rms_thresh = self.telemetry_cfg.oscillation_min_gyro_rms
         oscillation_detected = False
         notes = []
-        if pitch_freq > 3.0 and gyro_rms[1] > 2.0:
+        if pitch_freq > osc_freq_thresh and gyro_rms[1] > osc_rms_thresh:
             oscillation_detected = True
             notes.append(f"pitch oscillation detected at ~{pitch_freq:.1f}Hz, wy_rms={gyro_rms[1]:.1f}rad/s")
-        if roll_freq > 3.0 and gyro_rms[0] > 2.0:
+        if roll_freq > osc_freq_thresh and gyro_rms[0] > osc_rms_thresh:
             oscillation_detected = True
             notes.append(f"roll oscillation detected at ~{roll_freq:.1f}Hz, wx_rms={gyro_rms[0]:.1f}rad/s")
         oscillation_note = "; ".join(notes) if notes else "Attitude rates stable"
@@ -284,16 +319,17 @@ class System1System2Bridge:
         # 3. Motor Commands & Saturation
         ctrls = np.array([s["ctrl"] for s in samples])  # [N, 4]
         ctrl_mean = np.mean(ctrls, axis=0)
-        # Saturation defined as ctrl <= 0.05 or ctrl >= 12.95
-        sat_mask = (ctrls <= 0.05) | (ctrls >= 12.95)
+        # Saturation defined by configured thresholds (defaults: <= 0.05 or >= 12.95)
+        sat_mask = (ctrls <= self.telemetry_cfg.motor_saturation_min) | (ctrls >= self.telemetry_cfg.motor_saturation_max)
         sat_pct = (np.sum(sat_mask, axis=0) / n) * 100.0
 
         # 4. Unmodeled Disturbance Estimates from L1
         sigma_f = np.mean(np.array([s["sigma_f_hat"] for s in samples]), axis=0)
         sigma_M = np.mean(np.array([s["sigma_M_hat"] for s in samples]), axis=0)
 
-        # Recent instantaneous / 50ms window (last 25 samples) to capture fast-onset gusts
-        recent_samples = samples[-25:] if len(samples) >= 25 else samples
+        # Recent instantaneous window (configured sample count, default 25 = 50ms) to capture fast-onset gusts
+        k_inst = max(1, self.telemetry_cfg.recent_instant_samples)
+        recent_samples = samples[-k_inst:] if len(samples) >= k_inst else samples
         inst_sigma_f = np.mean(np.array([s["sigma_f_hat"] for s in recent_samples]), axis=0)
 
         return TelemetrySummary(

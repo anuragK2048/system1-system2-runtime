@@ -20,7 +20,7 @@
         <geom group="2" type="mesh" contype="0" conaffinity="0"/>
       </default>
       <default class="collision">
-        <geom group="3" type="box"/>
+        <geom group="3" type="box" solref="0.005 1" solimp="0.9 0.95 0.001 0.5 2"/>
         <default class="rotor">
           <geom type="ellipsoid" size=".13 .13 .01"/>
         </default>
@@ -44,12 +44,23 @@
 
   <worldbody>
     <light pos="0 0 3.0" dir="0 0 -1" directional="true"/>
-    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane" solref="0.005 1" solimp="0.9 0.95 0.001 0.5 2"/>
 
     <!-- Central Camera Anchor between both drones -->
     <body name="camera_anchor" pos="0 0 1.0">
       <camera name="dual_track" pos="-3.4 0 1.2" xyaxes="0 -1 0 0.35 0 1" mode="track"/>
     </body>
+
+    <!-- Visual Target Landing Pads on the Floor for Reference -->
+    <!-- Drone 1 Target Pad (Orange / Right, Nominal Target: X=0, Y=-1.2m) -->
+    <geom name="d1_target_pad" type="cylinder" size="0.40 0.002" pos="0 -1.2 0.002" rgba="1.0 0.40 0.0 0.35" contype="0" conaffinity="0"/>
+    <geom name="d1_target_ring" type="cylinder" size="0.20 0.003" pos="0 -1.2 0.003" rgba="1.0 0.55 0.1 0.65" contype="0" conaffinity="0"/>
+    <geom name="d1_target_center" type="cylinder" size="0.05 0.005" pos="0 -1.2 0.005" rgba="1.0 0.95 0.8 0.9" contype="0" conaffinity="0"/>
+
+    <!-- Drone 2 Target Pad (Cyan / Left, Nominal Target: X=0, Y=+1.2m) -->
+    <geom name="d2_target_pad" type="cylinder" size="0.40 0.002" pos="0 1.2 0.002" rgba="0.0 0.85 1.0 0.35" contype="0" conaffinity="0"/>
+    <geom name="d2_target_ring" type="cylinder" size="0.20 0.003" pos="0 1.2 0.003" rgba="0.1 0.95 1.0 0.65" contype="0" conaffinity="0"/>
+    <geom name="d2_target_center" type="cylinder" size="0.05 0.005" pos="0 1.2 0.005" rgba="0.8 1.0 1.0 0.9" contype="0" conaffinity="0"/>
 
     <!-- =================================================================== -->
     <!-- DRONE 1 (SCREEN RIGHT, Spawn Y = -1.2m) - ORANGE/RED ACCENTS         -->

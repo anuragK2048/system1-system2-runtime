@@ -135,11 +135,24 @@ class L1Config:
     # Scaling factor for horizontal velocity estimation error
     vtilde_xy_scale: float = 1.0
 
-    # Fast Trigger limits (detecting when to alert System 2)
+    # Fast Trigger limits (detecting when to alert System 2; see FastTriggerConfig in runtime.config)
     pos_error_threshold: float = 0.30        # meters
     tilt_error_threshold_deg: float = 25.0   # degrees
     gyro_rms_threshold: float = 3.5          # rad/s
     force_disturbance_threshold: float = 3.0 # Newtons
+
+
+# ==============================================================================
+# SYSTEM 2 CONFIGURATION RE-EXPORTS (Centralized in runtime.config)
+# ==============================================================================
+from runtime.config.system2_config import (
+    FastTriggerConfig,
+    TelemetrySummaryConfig,
+    PatchApplicationConfig,
+    System2InferenceConfig,
+    System2WorkerConfig,
+    System2MasterConfig,
+)
 
 
 
