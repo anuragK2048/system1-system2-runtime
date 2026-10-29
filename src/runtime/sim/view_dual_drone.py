@@ -146,6 +146,12 @@ def main() -> None:
         default=8000,
         help="Port for live control server (default: 8000)",
     )
+    parser.add_argument(
+        "--s2-config",
+        type=str,
+        default=None,
+        help="Path to JSON configuration file for System 2 (e.g. configs/system2_default.json)",
+    )
 
     args = parser.parse_args()
 
@@ -170,7 +176,13 @@ def main() -> None:
         d1_mode = "l1_adaptive"
         d2_mode = "l1_adaptive+system2"
 
-    provider_label = args.provider or "groq (default)"
+    s2_cfg = None
+    if args.s2_config:
+        from runtime.config import System2MasterConfig
+        s2_cfg = System2MasterConfig.load_json(args.s2_config)
+        print(f"⚙️ Loaded Custom System 2 Config: {args.s2_config}")
+
+    provider_label = args.provider or (s2_cfg.inference.provider if s2_cfg and s2_cfg.inference.provider else "groq (default)")
     d1_sys = get_system_naming(d1_mode)
     d2_sys = get_system_naming(d2_mode)
     print(f"\n🚀 Launching Dual Drone Simulator:")
@@ -182,6 +194,7 @@ def main() -> None:
         drone2_mode=d2_mode,
         llm_provider=args.provider,
         llm_model=args.model,
+        s2_cfg=s2_cfg,
     )
 
     # Launch background FastAPI & WebSocket control server if requested

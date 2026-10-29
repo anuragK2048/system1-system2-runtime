@@ -26,6 +26,7 @@ from runtime.sim.config import (
     L1Config,
     ChaosConfig,
     get_system_naming,
+    System2MasterConfig,
 )
 from runtime.sim.system1_controller import System1Controller
 from runtime.sim.chaos_injector import ChaosManager
@@ -61,6 +62,7 @@ class DualDroneSimulator:
         pid_cfg: Optional[PIDConfig] = None,
         l1_cfg: Optional[L1Config] = None,
         chaos_cfg: Optional[ChaosConfig] = None,
+        s2_cfg: Optional[System2MasterConfig] = None,
     ) -> None:
         self.drone1_mode = drone1_mode.lower().strip()
         self.drone2_mode = drone2_mode.lower().strip()
@@ -84,6 +86,7 @@ class DualDroneSimulator:
         self.drone_cfg = drone_cfg or DroneConfig()
         self.pid_cfg = pid_cfg or PIDConfig()
         self.l1_cfg = l1_cfg or L1Config()
+        self.s2_cfg = s2_cfg or System2MasterConfig()
         self.chaos = ChaosManager(cfg=chaos_cfg)
 
         # Register with server state context for live WebSocket & REST control
@@ -112,6 +115,9 @@ class DualDroneSimulator:
             tilt_deg_threshold=self.l1_cfg.tilt_error_threshold_deg,
             gyro_norm_threshold=self.l1_cfg.gyro_rms_threshold,
             force_residual_threshold=self.l1_cfg.force_disturbance_threshold,
+            trigger_cfg=self.s2_cfg.trigger,
+            telemetry_cfg=self.s2_cfg.telemetry,
+            patch_cfg=self.s2_cfg.patch,
         )
         self.controller_1 = System1Controller(
             drone_cfg=self.drone_cfg,
@@ -120,6 +126,7 @@ class DualDroneSimulator:
             bridge=self.bridge_1,
             mode=d1_sys1_mode,
             target_pos=self.d1_target,
+            patch_cfg=self.s2_cfg.patch,
         )
 
         # ----------------------------------------------------------------------
@@ -131,6 +138,9 @@ class DualDroneSimulator:
             tilt_deg_threshold=self.l1_cfg.tilt_error_threshold_deg,
             gyro_norm_threshold=self.l1_cfg.gyro_rms_threshold,
             force_residual_threshold=self.l1_cfg.force_disturbance_threshold,
+            trigger_cfg=self.s2_cfg.trigger,
+            telemetry_cfg=self.s2_cfg.telemetry,
+            patch_cfg=self.s2_cfg.patch,
         )
         self.controller_2 = System1Controller(
             drone_cfg=self.drone_cfg,
@@ -139,6 +149,7 @@ class DualDroneSimulator:
             bridge=self.bridge_2,
             mode=d2_sys1_mode,
             target_pos=self.d2_target,
+            patch_cfg=self.s2_cfg.patch,
         )
 
         # ----------------------------------------------------------------------
@@ -159,6 +170,7 @@ class DualDroneSimulator:
                     provider=self.llm_provider,
                     model=self.llm_model,
                     drone_name="Drone 1 (Right / Orange)",
+                    master_cfg=self.s2_cfg,
                 )
             if self.d2_enable_system2:
                 self.worker_2 = System2Worker(
@@ -166,6 +178,7 @@ class DualDroneSimulator:
                     provider=self.llm_provider,
                     model=self.llm_model,
                     drone_name="Drone 2 (Left / Cyan)",
+                    master_cfg=self.s2_cfg,
                 )
 
         # ----------------------------------------------------------------------
@@ -320,14 +333,30 @@ class DualDroneSimulator:
         actual_thrust_1 = self.chaos.degrade_actuators_for_drone(1, thrust_1, sim_time=sim_time)
         actual_thrust_2 = self.chaos.degrade_actuators_for_drone(2, thrust_2, sim_time=sim_time)
 
+        # ----------------------------------------------------------------------
+        # Automatic Crash Disarm: Cut motor thrust to 0 upon ground contact or tumble.
+        # Prevents high-RPM rotors from driving inverted into the floor, eliminating
+        # contact impulse spikes and QACC warnings in MUJOCO_LOG.TXT.
+        # ----------------------------------------------------------------------
+        qx1, qy1 = quat_1[1], quat_1[2]
+        tilt_deg_1 = float(np.degrees(np.arccos(np.clip(1.0 - 2.0 * (qx1**2 + qy1**2), -1.0, 1.0))))
+        if (pos_1[2] < 0.12) or (pos_1[2] < 0.35 and tilt_deg_1 > 50.0) or (tilt_deg_1 > 85.0):
+            actual_thrust_1 = np.zeros(4, dtype=np.float32)
+
+        qx2, qy2 = quat_2[1], quat_2[2]
+        tilt_deg_2 = float(np.degrees(np.arccos(np.clip(1.0 - 2.0 * (qx2**2 + qy2**2), -1.0, 1.0))))
+        if (pos_2[2] < 0.12) or (pos_2[2] < 0.35 and tilt_deg_2 > 50.0) or (tilt_deg_2 > 85.0):
+            actual_thrust_2 = np.zeros(4, dtype=np.float32)
+
         self.data.ctrl[self.d1_act_ids] = actual_thrust_1
         self.data.ctrl[self.d2_act_ids] = actual_thrust_2
 
         # 7. Step physics
         mujoco.mj_step(self.model, self.data)
 
-        # 8. Dynamic Camera Tracking Anchor (Midpoint between both drones)
-        self.data.xpos[self.anchor_body_id, :] = 0.5 * (pos_1 + pos_2)
+        # 8. Fixed Camera Tracking Anchor at Arena Midpoint [0, 0, 1.0]
+        # Anchoring to the fixed nominal midpoint ensures physical drift away from target pads is clearly visible in 3D
+        self.data.xpos[self.anchor_body_id, :] = np.array([0.0, 0.0, 1.0], dtype=np.float32)
 
         diag_1.update({
             "pos": pos_1,

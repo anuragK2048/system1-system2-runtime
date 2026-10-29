@@ -7,6 +7,41 @@
 ## Architecture Overview
 
 ```
+[ MuJoCo Physics (500 Hz / 2 ms) ]
+                │
+                ▼
+[ System 1 Controller (500 Hz) ]
+  ├── 1. Geometric Controller (u_b: SE(3) attitude & position tracking)
+  └── 2. L1 Adaptive Observer (u_ad: estimates unmodeled force sigma_f & moment sigma_M)
+                │
+                ▼
+[ 500 Hz Fast Bridge & Ring Buffer ]
+  ├── Evaluates 4 Fast Trigger channels:
+  │     • Pos Error > 0.30m
+  │     • Tilt > 25°
+  │     • Gyro > 3.5 rad/s
+  │     • L1 Disturbance Force > 3.0N  <-- (Provided by L1 observer!)
+  └── If tripped: Bundles last 1.0s sliding window into TelemetrySummary
+                │
+                ▼ (Non-blocking background thread)
+[ System 2 LLM Meta-Controller (0.5 - 2 Hz) ]
+  ├── Diagnoses root cause (e.g., "10N headwind with pitch tilt")
+  └── Returns JSON Control Patch:
+        • feedforward_force_offset: [dFx, dFy, dFz]
+        • motor_trim_scale: [m1, m2, m3, m4]
+        • gain_multipliers: {pos_kp, pos_kd, att_kp, att_kd}
+        • safety_envelope: {max_tilt_deg}
+                │
+                ▼
+[ Injected back into System 1 (500 Hz) ]
+  ├── dF is added directly to target acceleration (pre-tilting against wind)
+  ├── Motor trim scales individual PWM outputs (compensating degraded motors)
+  └── Gains adjust damping to eliminate chatter
+```
+
+
+
+```
                       ┌───────────────────────────────────────────────┐
                       │  System 2 (Async LLM Meta-Controller, 1-5 Hz) │
                       │  - Diagnoses failures and environmental chaos │
