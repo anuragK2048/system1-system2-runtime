@@ -1,0 +1,1 @@
+{"_notes":"Pass/fail verdict thresholds for src/runtime/evals/verdict.py. Only include keys you want to override; anything absent falls back to the built-in defaults. crash=false means any crash is an automatic FAIL. Timing thresholds are in sim seconds.","crash":false,"max_pos_error_m":1.5,"max_tilt_deg":60.0,"recovery_time_s":5.0,"t_detect_s":2.0,"t_patch_s":10.0}

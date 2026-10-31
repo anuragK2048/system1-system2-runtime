@@ -26,7 +26,7 @@ def print_comparison_table(report: BenchmarkReport) -> None:
     print(f"System-1 Crashes:            {report.s1_total_crashes} | System-1+S2 Crashes: {report.s2_total_crashes}")
     print(f"Hero Scenarios (S1 Crashed, S1+S2 Survived): {report.hero_scenarios_count}")
     print("-" * w)
-    print(f"{'Scenario':<26} | {'Sev':<4} | {'S1 Pos (m)':<10} | {'S2 Pos (m)':<10} | {'Imp %':<8} | {'Winner':<14}")
+    print(f"{'Scenario':<26} | {'Sev':<4} | {'S1 Pos (m)':<10} | {'S2 Pos (m)':<10} | {'Imp %':<8} | {'S2 Verdict':<10} | {'Winner':<14}")
     print("-" * w)
 
     for c in report.comparisons:
@@ -34,8 +34,9 @@ def print_comparison_table(report: BenchmarkReport) -> None:
         s2_err = c.s2_metrics.get("mean_pos_error", 0.0)
         s1_str = f"{s1_err:.3f}" if not c.s1_crashed else "💥 CRASH"
         s2_str = f"{s2_err:.3f}" if not c.s2_crashed else "💥 CRASH"
+        verdict_str = f"{c.s2_pass_rate * 100:.0f}% PASS" if c.s2_pass_rate >= 1.0 else (f"{c.s2_pass_rate * 100:.0f}% pass" if c.s2_pass_rate > 0 else "FAIL")
         name = (c.scenario_name[:24] + "..") if len(c.scenario_name) > 26 else c.scenario_name
-        print(f"{name:<26} | {c.severity:<4.1f} | {s1_str:<10} | {s2_str:<10} | {c.pos_improvement_pct:+7.1f}% | {c.winner:<14}")
+        print(f"{name:<26} | {c.severity:<4.1f} | {s1_str:<10} | {s2_str:<10} | {c.pos_improvement_pct:+7.1f}% | {verdict_str:<10} | {c.winner:<14}")
 
     print("═" * w + "\n")
 
@@ -89,6 +90,11 @@ def generate_html_dashboard(
             if "SURVIVAL" in c.winner
             else (f"<span class='badge badge-win'>S1+S2 WIN</span>" if "s1_s2" in c.winner else "<span class='badge badge-loss'>S1 ONLY</span>")
         )
+        verdict_badge = (
+            f"<span class='badge badge-win'>PASS {c.s2_pass_rate * 100:.0f}%</span>"
+            if c.s2_pass_rate >= 1.0
+            else (f"<span class='badge'>pass {c.s2_pass_rate * 100:.0f}%</span>" if c.s2_pass_rate > 0 else "<span class='badge badge-loss'>FAIL</span>")
+        )
 
         rows_html.append(f"""
         <tr>
@@ -99,6 +105,7 @@ def generate_html_dashboard(
             <td class='{imp_class}'><strong>{c.pos_improvement_pct:+.1f}%</strong></td>
             <td>{c.safety_score_s1:.0f} vs <strong class='good'>{c.safety_score_s2:.0f}</strong></td>
             <td>{c.recovery_speedup:.2f}x</td>
+            <td>{verdict_badge}</td>
             <td>{winner_badge}</td>
         </tr>
         """)
@@ -297,6 +304,7 @@ def generate_html_dashboard(
                         <th>Improvement %</th>
                         <th>Safety Score (S1 vs S2)</th>
                         <th>Recovery Speedup</th>
+                        <th>S2 Verdict</th>
                         <th>Outcome</th>
                     </tr>
                 </thead>

@@ -22,6 +22,7 @@ from runtime.brain.llm import System2Brain
 from runtime.schemas.tier2 import System2Patch, GainMultipliers, SafetyEnvelope
 from runtime.evals.scenarios import EvalScenario, get_scenario
 from runtime.evals.metrics import StepRecord, compute_all_metrics, compute_safety_score
+from runtime.evals.verdict import compute_verdict
 
 
 @dataclass
@@ -42,6 +43,7 @@ class EvalResult:
     s2_latencies: List[float] = field(default_factory=list)
     timeseries_path: Optional[str] = None
     timestamp: float = field(default_factory=time.time)
+    verdict: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -59,6 +61,7 @@ class EvalResult:
             "s2_latencies": self.s2_latencies,
             "timeseries_path": self.timeseries_path,
             "timestamp": self.timestamp,
+            "verdict": self.verdict,
         }
 
 
@@ -206,6 +209,12 @@ def run_eval(
     sim.chaos.drone2 = copy.deepcopy(chaos_state)
     sim.chaos._kicked_payloads.clear()
 
+    # Fault-timing anchor (sim seconds) for time-to-detect / time-to-patch.
+    # The scenario fault becomes active here, right after the warmup hover.
+    fault_onset_s: float = float(sim.data.time)
+    first_trigger_s: Optional[float] = None
+    patch_applied_s: Optional[float] = None
+
     eval_steps = int(effective_duration / dt)
     step_records: List[StepRecord] = []
 
@@ -245,6 +254,13 @@ def run_eval(
         if mode == "s1_s2" and not crashed:
             # Check if trigger event fired or attention threshold exceeded
             trigger_event = bridge.get_latest_trigger_event(max_age_s=2.0)
+            # Record first System-2 trigger (detection) in sim seconds.
+            # Done on observation (not on S2 call) so cooldown/reconsult gating
+            # does not shift the detection time.
+            if trigger_event is not None and first_trigger_s is None:
+                _ts = getattr(trigger_event, "timestamp", None)
+                if _ts is not None:
+                    first_trigger_s = float(_ts)
             elapsed_since_s2 = current_sim_time - last_s2_time
 
             can_call_s2 = (
@@ -280,6 +296,8 @@ def run_eval(
                 if chosen_patch:
                     bridge.apply_system2_patch(chosen_patch)
                     patch_applied = True
+                    if patch_applied_s is None:
+                        patch_applied_s = float(current_sim_time)
                     s2_diagnoses.append(chosen_patch.diagnosis)
                     s2_patches.append(chosen_patch.to_dict())
                     s2_latencies.append(call_lat_s)
@@ -303,6 +321,11 @@ def run_eval(
             "crashed": crashed,
             "s2_called": s2_called_this_step,
             "s2_patch_active": active_p is not None,
+            # Run-level timing anchors, stamped per step so the registry
+            # metrics stay pure functions of the step list.
+            "fault_onset_s": round(fault_onset_s, 4),
+            "trigger_t": round(first_trigger_s, 4) if first_trigger_s is not None else None,
+            "patch_applied_t": round(patch_applied_s, 4) if patch_applied_s is not None else None,
         }
         step_records.append(record)
 
@@ -310,6 +333,7 @@ def run_eval(
     metrics = compute_all_metrics(step_records)
     safety = compute_safety_score(metrics)
     is_crashed = bool(metrics.get("crash", False))
+    verdict = compute_verdict(metrics)
 
     # 4. Optional Time-Series Logging to JSONL
     ts_path_str: Optional[str] = None
@@ -337,4 +361,5 @@ def run_eval(
         s2_patches=s2_patches,
         s2_latencies=s2_latencies,
         timeseries_path=ts_path_str,
+        verdict=verdict,
     )
