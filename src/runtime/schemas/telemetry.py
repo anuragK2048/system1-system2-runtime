@@ -125,9 +125,6 @@ class TelemetrySummary:
             f"- External Disturbance Moment: Mx = {mx:+.3f}Nm, My = {my:+.3f}Nm, Mz = {mz:+.3f}Nm"
         )
         return "\n".join(lines)
-<<<<<<< HEAD
-=======
-
     @property
     def estimated_altitude(self) -> float:
         """Estimated altitude in world frame (m) based on 1.0m nominal hover target."""
@@ -147,7 +144,6 @@ class TelemetrySummary:
     def pos_mean(self) -> List[float]:
         """Estimated position [x, y, z] in world frame based on nominal hover target."""
         return [float(-self.pos_error[0]), float(-self.pos_error[1]), float(1.0 - self.pos_error[2])]
->>>>>>> origin/main
 
     def to_dict(self) -> Dict[str, object]:
         return {

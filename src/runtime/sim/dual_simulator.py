@@ -278,37 +278,11 @@ class DualDroneSimulator:
         Returns:
             Tuple of (telemetry_drone1, telemetry_drone2).
         """
-<<<<<<< HEAD
         # 0. Record fault on/off transitions for trigger timing correlation
         self.bridge_1.note_fault_state(self.chaos.active_chaos, float(self.data.time))
         self.bridge_2.note_fault_state(self.chaos.active_chaos, float(self.data.time))
 
-        # 1. Update swinging cargo coupling for BOTH drones
-        self.chaos.apply_payload_physics(
-            self.model,
-            self.data,
-            self.d1_payload_id,
-            self.d1_tether_id,
-            self.d1_bob_id,
-            self.d1_payload_mass,
-            qpos_adr=self.d1_payload_qpos_adr,
-            qvel_adr=self.d1_payload_dof_adr,
-        )
-        self.chaos.apply_payload_physics(
-            self.model,
-            self.data,
-            self.d2_payload_id,
-            self.d2_tether_id,
-            self.d2_bob_id,
-            self.d2_payload_mass,
-            qpos_adr=self.d2_payload_qpos_adr,
-            qvel_adr=self.d2_payload_dof_adr,
-        )
-
-        # 2. Reset applied body forces and apply wind to BOTH drones
-=======
         # 1. Reset applied body forces and generalized forces (drone bodies + payload bodies)
->>>>>>> origin/main
         self.data.xfrc_applied[self.d1_body_id, :] = 0.0
         self.data.xfrc_applied[self.d2_body_id, :] = 0.0
         self.data.xfrc_applied[self.d1_payload_id, :] = 0.0
