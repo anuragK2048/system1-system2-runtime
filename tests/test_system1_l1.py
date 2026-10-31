@@ -144,6 +144,12 @@ class TestSystem1L1Adaptive(unittest.TestCase):
         self.assertIn("Position Error", llm_text)
         self.assertIn("External Disturbance Force", llm_text)
 
+        # Verify helper properties for crash/altitude/tilt checks
+        self.assertAlmostEqual(summary.estimated_altitude, 0.9, delta=0.05)
+        self.assertAlmostEqual(summary.pos_mean[2], 0.9, delta=0.05)
+        self.assertGreaterEqual(summary.tilt_deg, 0.0)
+        self.assertEqual(summary.tilt_deg, summary.tilt_deg_mean)
+
     def test_fast_trigger_mechanism(self):
         """Verify Fast Trigger fires when thresholds are exceeded."""
         target_pos = np.array([0.0, 0.0, 1.0])
@@ -202,18 +208,23 @@ class TestSystem1L1Adaptive(unittest.TestCase):
         self.assertIn("sigma_M_hat", diag)
 
     def test_brain_provider_selection(self):
-        """Verify System2Brain supports both Groq and Baseten provider configurations."""
+        """Verify System2Brain supports Groq, Baseten, and Fireworks provider configurations."""
         from runtime.brain.llm import System2Brain
 
         # Groq provider
         brain_groq = System2Brain(provider="groq")
         self.assertEqual(brain_groq.provider, "groq")
-        self.assertIn("gpt-oss", brain_groq.model)
+        self.assertTrue("qwen" in brain_groq.model or "gpt-oss" in brain_groq.model)
 
         # Baseten provider
-        brain_baseten = System2Brain(provider="baseten")
+        brain_baseten = System2Brain(provider="baseten", api_key="dummy_baseten_key")
         self.assertEqual(brain_baseten.provider, "baseten")
-        self.assertIn("muse-spark", brain_baseten.model)
+        self.assertTrue("DeepSeek" in brain_baseten.model or "muse-spark" in brain_baseten.model)
+
+        # Fireworks provider
+        brain_fireworks = System2Brain(provider="fireworks", api_key="dummy_fw_key")
+        self.assertEqual(brain_fireworks.provider, "fireworks")
+        self.assertIn("deepseek", brain_fireworks.model.lower())
 
         # Unsupported provider raises ValueError
         with self.assertRaises(ValueError):

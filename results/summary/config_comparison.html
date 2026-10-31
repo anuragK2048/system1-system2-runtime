@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Configuration Comparison: system2_default vs system2_tuned_template</title>
+<style>
+    :root {
+        --bg: #090d16;
+        --card-bg: #111827;
+        --border: #1f2937;
+        --text: #f9fafb;
+        --dim: #9ca3af;
+        --good: #10b981;
+        --bad: #ef4444;
+        --highlight: #38bdf8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 32px 20px; line-height: 1.5; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    header { margin-bottom: 28px; border-bottom: 1px solid var(--border); padding-bottom: 16px; }
+    h1 { font-size: 26px; color: #fff; margin-bottom: 6px; }
+    .subtitle { color: var(--dim); font-size: 14px; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 28px; }
+    .kpi-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+    .kpi-title { font-size: 12px; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
+    .kpi-value { font-size: 32px; font-weight: 800; }
+    .good { color: var(--good); }
+    .bad { color: var(--bad); }
+    .highlight { color: var(--highlight); }
+    .dim { color: var(--dim); }
+    .crash { color: var(--bad); font-weight: 800; }
+    .section { margin-bottom: 32px; }
+    h2 { font-size: 18px; margin-bottom: 12px; font-weight: 600; }
+    .table-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
+    th, td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+    th { background: #0f172a; color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+    tr:last-child td { border-bottom: none; }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; background: #1e293b; color: #94a3b8; }
+    .badge-win { background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-loss { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
+</style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>⚖️ Configuration A/B Comparison</h1>
+        <div class="subtitle">Evaluating <strong>system2_default</strong> vs. <strong>system2_tuned_template</strong> across all benchmark scenarios</div>
+    </header>
+
+    <div class="kpi-grid">
+        <div class="kpi-card">
+            <div class="kpi-title">Net Improvement (system2_tuned_template vs system2_default)</div>
+            <div class="kpi-value bad">-137.3%</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-title">system2_tuned_template Win Count</div>
+            <div class="kpi-value good">2</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-title">system2_default Win Count</div>
+            <div class="kpi-value dim">8</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-title">Parameters Changed</div>
+            <div class="kpi-value highlight">36</div>
+        </div>
+    </div>
+
+    <section class="section">
+        <h2>🔧 Configuration Parameters Changed</h2>
+        <div class="table-card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Parameter Path</th>
+                        <th>system2_default</th>
+                        <th>system2_tuned_template</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+        <tr>
+            <td><code>inference.general_max_tokens</code></td>
+            <td><span class='dim'>4096</span></td>
+            <td><strong class='highlight'>1024</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>inference.groq_max_completion_tokens</code></td>
+            <td><span class='dim'>2048</span></td>
+            <td><strong class='highlight'>512</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>inference.model</code></td>
+            <td><span class='dim'>None</span></td>
+            <td><strong class='highlight'>qwen/qwen3.8-27b</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>inference.provider</code></td>
+            <td><span class='dim'>None</span></td>
+            <td><strong class='highlight'>groq</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>inference.seed</code></td>
+            <td><span class='dim'>None</span></td>
+            <td><strong class='highlight'>42</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>inference.temperature</code></td>
+            <td><span class='dim'>0.2</span></td>
+            <td><strong class='highlight'>0.05</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>patch.confidence_scaling</code></td>
+            <td><span class='dim'>False</span></td>
+            <td><strong class='highlight'>True</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>patch.gain_multiplier_clamp_max</code></td>
+            <td><span class='dim'>3.0</span></td>
+            <td><strong class='highlight'>2.5</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>patch.gain_multiplier_clamp_min</code></td>
+            <td><span class='dim'>0.1</span></td>
+            <td><strong class='highlight'>0.2</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>patch.max_tilt_deg_clamp_max</code></td>
+            <td><span class='dim'>45.0</span></td>
+            <td><strong class='highlight'>35.0</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>patch.max_tilt_deg_clamp_min</code></td>
+            <td><span class='dim'>5.0</span></td>
+            <td><strong class='highlight'>8.0</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>patch.motor_trim_clamp_min</code></td>
+            <td><span class='dim'>0.0</span></td>
+            <td><strong class='highlight'>0.2</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>patch.patch_ttl_s</code></td>
+            <td><span class='dim'>None</span></td>
+            <td><strong class='highlight'>8.0</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>patch.ramp_duration_s</code></td>
+            <td><span class='dim'>0.0</span></td>
+            <td><strong class='highlight'>0.3</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>telemetry.include_active_patch</code></td>
+            <td><span class='dim'>False</span></td>
+            <td><strong class='highlight'>True</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>trigger.force_residual_threshold</code></td>
+            <td><span class='dim'>3.0</span></td>
+            <td><strong class='highlight'>1.8</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>trigger.gyro_norm_threshold</code></td>
+            <td><span class='dim'>3.5</span></td>
+            <td><strong class='highlight'>2.5</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>trigger.min_sim_time</code></td>
+            <td><span class='dim'>1.0</span></td>
+            <td><strong class='highlight'>0.8</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>trigger.pos_error_threshold</code></td>
+            <td><span class='dim'>0.3</span></td>
+            <td><strong class='highlight'>0.18</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>trigger.tilt_deg_threshold</code></td>
+            <td><span class='dim'>25.0</span></td>
+            <td><strong class='highlight'>18.0</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>trigger.trigger_cooldown_s</code></td>
+            <td><span class='dim'>0.5</span></td>
+            <td><strong class='highlight'>0.3</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>worker.attention_force_disturbance</code></td>
+            <td><span class='dim'>2.5</span></td>
+            <td><strong class='highlight'>1.8</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>worker.attention_moment_disturbance</code></td>
+            <td><span class='dim'>0.35</span></td>
+            <td><strong class='highlight'>0.25</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>worker.attention_pos_error</code></td>
+            <td><span class='dim'>0.3</span></td>
+            <td><strong class='highlight'>0.18</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>worker.calm_force_disturbance</code></td>
+            <td><span class='dim'>1.0</span></td>
+            <td><strong class='highlight'>0.8</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>worker.calm_min_settle_time_s</code></td>
+            <td><span class='dim'>2.5</span></td>
+            <td><strong class='highlight'>3.0</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>worker.calm_moment_disturbance</code></td>
+            <td><span class='dim'>0.2</span></td>
+            <td><strong class='highlight'>0.15</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>worker.calm_pos_error</code></td>
+            <td><span class='dim'>0.15</span></td>
+            <td><strong class='highlight'>0.1</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>worker.cooldown_s</code></td>
+            <td><span class='dim'>2.0</span></td>
+            <td><strong class='highlight'>1.0</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>worker.crash_runaway_pos_error</code></td>
+            <td><span class='dim'>4.5</span></td>
+            <td><strong class='highlight'>3.5</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>worker.loop_poll_interval_s</code></td>
+            <td><span class='dim'>0.05</span></td>
+            <td><strong class='highlight'>0.03</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>worker.reconsult_min_patch_age_s</code></td>
+            <td><span class='dim'>6.0</span></td>
+            <td><strong class='highlight'>4.0</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>worker.reconsult_oscillation_age_s</code></td>
+            <td><span class='dim'>4.0</span></td>
+            <td><strong class='highlight'>3.0</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>worker.reconsult_pos_error</code></td>
+            <td><span class='dim'>0.75</span></td>
+            <td><strong class='highlight'>0.5</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>worker.stable_pos_error</code></td>
+            <td><span class='dim'>0.3</span></td>
+            <td><strong class='highlight'>0.25</strong></td>
+        </tr>
+        
+        <tr>
+            <td><code>worker.warmup_min_timestamp</code></td>
+            <td><span class='dim'>1.0</span></td>
+            <td><strong class='highlight'>0.8</strong></td>
+        </tr>
+        
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="section">
+        <h2>📊 Scenario-by-Scenario Performance Comparison</h2>
+        <div class="table-card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Scenario</th>
+                        <th>Severity</th>
+                        <th>system2_default Mean Err</th>
+                        <th>system2_tuned_template Mean Err</th>
+                        <th>Delta % (Gain)</th>
+                        <th>Safety Score</th>
+                        <th>Verdict</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+        <tr>
+            <td><strong>Chipped Propeller (M1 40% Thrust)</strong></td>
+            <td><code>1.0x</code></td>
+            <td>0.064m</td>
+            <td>0.139m</td>
+            <td class='bad'><strong>-118.4%</strong></td>
+            <td>96 vs 92</td>
+            <td><span class='badge badge-loss'>system2_default</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Chipped Propeller (M1 40% Thrust)</strong></td>
+            <td><code>1.5x</code></td>
+            <td><span class='crash'>CRASH</span></td>
+            <td><span class='crash'>CRASH</span></td>
+            <td class='bad'><strong>-11.1%</strong></td>
+            <td>0 vs 0</td>
+            <td><span class='badge badge-loss'>system2_default</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>6.5N Crosswind Microburst</strong></td>
+            <td><code>1.0x</code></td>
+            <td>0.190m</td>
+            <td>1.295m</td>
+            <td class='bad'><strong>-582.9%</strong></td>
+            <td>71 vs 44</td>
+            <td><span class='badge badge-loss'>system2_default</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>6.5N Crosswind Microburst</strong></td>
+            <td><code>1.5x</code></td>
+            <td>0.328m</td>
+            <td>1.751m</td>
+            <td class='bad'><strong>-433.3%</strong></td>
+            <td>58 vs 23</td>
+            <td><span class='badge badge-loss'>system2_default</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Tethered Cargo in 4.0N Wind</strong></td>
+            <td><code>1.0x</code></td>
+            <td>0.478m</td>
+            <td>0.831m</td>
+            <td class='bad'><strong>-73.8%</strong></td>
+            <td>69 vs 62</td>
+            <td><span class='badge badge-loss'>system2_default</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Tethered Cargo in 4.0N Wind</strong></td>
+            <td><code>1.5x</code></td>
+            <td>0.737m</td>
+            <td>1.170m</td>
+            <td class='bad'><strong>-58.7%</strong></td>
+            <td>54 vs 47</td>
+            <td><span class='badge badge-loss'>system2_default</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Severe IMU Sensor Chatter</strong></td>
+            <td><code>1.0x</code></td>
+            <td>0.231m</td>
+            <td>0.138m</td>
+            <td class='good'><strong>+40.3%</strong></td>
+            <td>91 vs 94</td>
+            <td><span class='badge badge-win'>system2_tuned_template</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Severe IMU Sensor Chatter</strong></td>
+            <td><code>1.5x</code></td>
+            <td>0.352m</td>
+            <td>0.207m</td>
+            <td class='good'><strong>+41.2%</strong></td>
+            <td>86 vs 91</td>
+            <td><span class='badge badge-win'>system2_tuned_template</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Compound Failure Stress Test</strong></td>
+            <td><code>1.0x</code></td>
+            <td>0.424m</td>
+            <td>0.973m</td>
+            <td class='bad'><strong>-129.5%</strong></td>
+            <td>74 vs 58</td>
+            <td><span class='badge badge-loss'>system2_default</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Compound Failure Stress Test</strong></td>
+            <td><code>1.5x</code></td>
+            <td><span class='crash'>CRASH</span></td>
+            <td><span class='crash'>CRASH</span></td>
+            <td class='bad'><strong>-46.5%</strong></td>
+            <td>0 vs 1</td>
+            <td><span class='badge badge-loss'>system2_default</span></td>
+        </tr>
+        
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+</body>
+</html>

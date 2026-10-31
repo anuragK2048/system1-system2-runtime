@@ -1,29 +1,25 @@
 """Chaos Injector and Failure Mode Simulator.
 
-What is Chaos in this System?
-------------------------------
-Real-world drones face unpredictable environmental and mechanical anomalies:
-1. Motor 1 Failure: A chipped or cracked propeller blade, or an ESC (Electronic Speed
-   Controller) losing power. The drone commands full thrust, but the damaged rotor
-   produces only 40%, creating severe roll/pitch instability.
-2. Swinging Payload: Autonomous delivery drones carrying tethered cargo. The sloshing/
-   pendulum mass acts as a non-linear oscillator that pulls the drone around.
-3. Sensor Noise: Motor vibrations or loose mounting cause gyro chatter in the IMU,
-   tricking standard PID into aggressive, destabilizing twitching.
-4. Wind Gusts: Sudden 5.0 N lateral gusts testing whether the reflex controller can
-   recover and maintain station.
+NOTE: The chaos injection engine has been refactored and modernized into the
+dedicated `runtime.chaos` package for modular real-time continuous control,
+aerodynamic wind coupling, and dual-drone targeting.
 
-This module encapsulates all chaos states, keyboard listeners (preventing MuJoCo
-collisions), and physical perturbations applied to MuJoCo data.
+This module re-exports `ChaosManager` from `runtime.chaos` to maintain 100%
+backward compatibility with existing simulation runners and unit tests.
 """
 
-import time
-import ctypes
-from typing import Dict, Optional
-import numpy as np
-import mujoco
-from runtime.sim.config import ChaosConfig
+from runtime.chaos.manager import ChaosManager, is_shift_down
+from runtime.chaos.models import (
+    ChaosTarget,
+    MotorChaosConfig,
+    WindChaosConfig,
+    PayloadChaosConfig,
+    SensorChaosConfig,
+    DroneChaosState,
+)
+from runtime.chaos.presets import CHAOS_PRESETS, get_preset_state
 
+<<<<<<< HEAD
 
 # ==============================================================================
 # MACOS SHIFT KEY MODIFIER DETECTION VIA COREGRAPHICS
@@ -282,3 +278,17 @@ class ChaosManager:
         if self.active_chaos["motor_failure"]:
             actual_thrust[0] *= self.cfg.motor_failure_multiplier
         return actual_thrust
+=======
+__all__ = [
+    "ChaosManager",
+    "is_shift_down",
+    "ChaosTarget",
+    "MotorChaosConfig",
+    "WindChaosConfig",
+    "PayloadChaosConfig",
+    "SensorChaosConfig",
+    "DroneChaosState",
+    "CHAOS_PRESETS",
+    "get_preset_state",
+]
+>>>>>>> origin/main

@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System-1 vs System-2 Autonomous Drone Benchmark Dashboard</title>
+<style>
+    :root {
+        --bg: #090d16;
+        --card-bg: #111827;
+        --border: #1f2937;
+        --text: #f9fafb;
+        --dim: #9ca3af;
+        --good: #10b981;
+        --bad: #ef4444;
+        --highlight: #38bdf8;
+        --accent: #f59e0b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        padding: 32px 20px;
+        line-height: 1.5;
+    }
+    .container { max-width: 1180px; margin: 0 auto; }
+    header { margin-bottom: 32px; border-bottom: 1px solid var(--border); padding-bottom: 20px; }
+    h1 { font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 6px; }
+    .subtitle { color: var(--dim); font-size: 14px; }
+    .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+        margin-bottom: 32px;
+    }
+    .kpi-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+    }
+    .kpi-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--dim); margin-bottom: 8px; }
+    .kpi-value { font-size: 32px; font-weight: 800; }
+    .good { color: var(--good); }
+    .bad { color: var(--bad); }
+    .highlight { color: var(--highlight); }
+    .dim { color: var(--dim); }
+    .crash { color: var(--bad); font-weight: 800; }
+    .section { margin-bottom: 36px; }
+    h2 { font-size: 20px; margin-bottom: 16px; font-weight: 600; }
+    .table-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
+    th, td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+    th { background: #0f172a; color: var(--dim); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    .badge {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+    .badge-win { background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-hero { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+    .badge-loss { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+    .bp-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+    .bp-card h3 { font-size: 16px; margin-bottom: 12px; }
+    .bp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px; }
+    .bp-metric strong { display: block; font-size: 18px; margin-top: 4px; }
+    .hero-tag { background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); padding: 8px 12px; border-radius: 8px; font-size: 12px; color: #bae6fd; }
+    .svg-chart { width: 100%; height: auto; display: block; background: #0c1220; border-radius: 8px; padding: 12px; border: 1px solid var(--border); margin-bottom: 16px; }
+</style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>🚁 System-1 + System-2 Hybrid Autonomous Drone Benchmark</h1>
+        <div class="subtitle">Side-by-side quantitative evaluation: Baseline SE(3) L1 Adaptive Controller vs. Asynchronous LLM Meta-Controller</div>
+    </header>
+
+    <div class="kpi-grid">
+        <div class="kpi-card">
+            <div class="kpi-title">S1+S2 Win Rate</div>
+            <div class="kpi-value good">75.0%</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-title">Mean Position Error Improvement</div>
+            <div class="kpi-value good">+18.0%</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-title">System-1 Crashes</div>
+            <div class="kpi-value bad">5</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-title">Hero Scenarios (S1 Crashed, S2 Saved)</div>
+            <div class="kpi-value highlight">0</div>
+        </div>
+    </div>
+
+    <section class="section">
+        <h2>📊 Position Error Improvement % per Scenario</h2>
+        
+    <svg viewBox='0 0 760 180' class='svg-chart'>
+        <line x1='30' y1='100' x2='740' y2='100' stroke='#334155' stroke-dasharray='4'/>
+        <text x='25' y='103' text-anchor='end' font-size='10' fill='#64748b'>0%</text>
+        
+            <rect x='40' y='100.0' width='24' height='0.0' fill='#10b981' rx='3'/>
+            <text x='52.0' y='96.0' text-anchor='middle' font-size='10' fill='#f1f5f9'>+0%</text>
+            <text x='52.0' y='145' text-anchor='middle' font-size='9' fill='#94a3b8'>chipp</text>
+            <text x='52.0' y='157' text-anchor='middle' font-size='8' fill='#64748b'>0.5x</text>
+        
+            <rect x='96' y='53.464' width='24' height='46.536' fill='#10b981' rx='3'/>
+            <text x='108.0' y='49.464' text-anchor='middle' font-size='10' fill='#f1f5f9'>+58%</text>
+            <text x='108.0' y='145' text-anchor='middle' font-size='9' fill='#94a3b8'>chipp</text>
+            <text x='108.0' y='157' text-anchor='middle' font-size='8' fill='#64748b'>1.0x</text>
+        
+            <rect x='152' y='92.44800000000001' width='24' height='7.552' fill='#10b981' rx='3'/>
+            <text x='164.0' y='88.44800000000001' text-anchor='middle' font-size='10' fill='#f1f5f9'>+9%</text>
+            <text x='164.0' y='145' text-anchor='middle' font-size='9' fill='#94a3b8'>chipp</text>
+            <text x='164.0' y='157' text-anchor='middle' font-size='8' fill='#64748b'>1.5x</text>
+        
+            <rect x='208' y='93.55199999999999' width='24' height='6.448' fill='#10b981' rx='3'/>
+            <text x='220.0' y='89.55199999999999' text-anchor='middle' font-size='10' fill='#f1f5f9'>+8%</text>
+            <text x='220.0' y='145' text-anchor='middle' font-size='9' fill='#94a3b8'>chipp</text>
+            <text x='220.0' y='157' text-anchor='middle' font-size='8' fill='#64748b'>2.0x</text>
+        
+            <rect x='264' y='26.279999999999987' width='24' height='73.72000000000001' fill='#10b981' rx='3'/>
+            <text x='276.0' y='22.279999999999987' text-anchor='middle' font-size='10' fill='#f1f5f9'>+92%</text>
+            <text x='276.0' y='145' text-anchor='middle' font-size='9' fill='#94a3b8'>micro</text>
+            <text x='276.0' y='157' text-anchor='middle' font-size='8' fill='#64748b'>0.5x</text>
+        
+            <rect x='320' y='28.320000000000007' width='24' height='71.67999999999999' fill='#10b981' rx='3'/>
+            <text x='332.0' y='24.320000000000007' text-anchor='middle' font-size='10' fill='#f1f5f9'>+90%</text>
+            <text x='332.0' y='145' text-anchor='middle' font-size='9' fill='#94a3b8'>micro</text>
+            <text x='332.0' y='157' text-anchor='middle' font-size='8' fill='#64748b'>1.0x</text>
+        
+            <rect x='376' y='32.70399999999999' width='24' height='67.296' fill='#10b981' rx='3'/>
+            <text x='388.0' y='28.703999999999994' text-anchor='middle' font-size='10' fill='#f1f5f9'>+84%</text>
+            <text x='388.0' y='145' text-anchor='middle' font-size='9' fill='#94a3b8'>micro</text>
+            <text x='388.0' y='157' text-anchor='middle' font-size='8' fill='#64748b'>1.5x</text>
+        
+            <rect x='432' y='79.368' width='24' height='20.632' fill='#10b981' rx='3'/>
+            <text x='444.0' y='75.368' text-anchor='middle' font-size='10' fill='#f1f5f9'>+26%</text>
+            <text x='444.0' y='145' text-anchor='middle' font-size='9' fill='#94a3b8'>micro</text>
+            <text x='444.0' y='157' text-anchor='middle' font-size='8' fill='#64748b'>2.0x</text>
+        
+            <rect x='488' y='62.248' width='24' height='37.752' fill='#10b981' rx='3'/>
+            <text x='500.0' y='58.248' text-anchor='middle' font-size='10' fill='#f1f5f9'>+47%</text>
+            <text x='500.0' y='145' text-anchor='middle' font-size='9' fill='#94a3b8'>tethe</text>
+            <text x='500.0' y='157' text-anchor='middle' font-size='8' fill='#64748b'>0.5x</text>
+        
+            <rect x='544' y='65.94399999999999' width='24' height='34.056000000000004' fill='#10b981' rx='3'/>
+            <text x='556.0' y='61.94399999999999' text-anchor='middle' font-size='10' fill='#f1f5f9'>+43%</text>
+            <text x='556.0' y='145' text-anchor='middle' font-size='9' fill='#94a3b8'>tethe</text>
+            <text x='556.0' y='157' text-anchor='middle' font-size='8' fill='#64748b'>1.0x</text>
+        
+            <rect x='600' y='69.92' width='24' height='30.080000000000002' fill='#10b981' rx='3'/>
+            <text x='612.0' y='65.92' text-anchor='middle' font-size='10' fill='#f1f5f9'>+38%</text>
+            <text x='612.0' y='145' text-anchor='middle' font-size='9' fill='#94a3b8'>tethe</text>
+            <text x='612.0' y='157' text-anchor='middle' font-size='8' fill='#64748b'>1.5x</text>
+        
+            <rect x='656' y='52.024' width='24' height='47.976' fill='#10b981' rx='3'/>
+            <text x='668.0' y='48.024' text-anchor='middle' font-size='10' fill='#f1f5f9'>+60%</text>
+            <text x='668.0' y='145' text-anchor='middle' font-size='9' fill='#94a3b8'>tethe</text>
+            <text x='668.0' y='157' text-anchor='middle' font-size='8' fill='#64748b'>2.0x</text>
+        
+    </svg>
+    
+    </section>
+
+    
+
+    <section class="section">
+        <h2>📋 Full Benchmark Matrix (Side-by-Side Statistics)</h2>
+        <div class="table-card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Scenario Name</th>
+                        <th>Severity</th>
+                        <th>S1 Baseline Mean Err</th>
+                        <th>S1+S2 Mean Err</th>
+                        <th>Improvement %</th>
+                        <th>Safety Score (S1 vs S2)</th>
+                        <th>Recovery Speedup</th>
+                        <th>Outcome</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+        <tr>
+            <td><strong>Chipped Propeller (M1 40% Thrust)</strong><br><small class='dim'>chipped_propeller</small></td>
+            <td><code>0.5x</code></td>
+            <td>0.035m</td>
+            <td><span class='good'>0.035m</span></td>
+            <td class='bad'><strong>+0.0%</strong></td>
+            <td>98 vs <strong class='good'>98</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-loss'>S1 ONLY</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Chipped Propeller (M1 40% Thrust)</strong><br><small class='dim'>chipped_propeller</small></td>
+            <td><code>1.0x</code></td>
+            <td>0.139m</td>
+            <td><span class='good'>0.058m</span></td>
+            <td class='good'><strong>+58.2%</strong></td>
+            <td>92 vs <strong class='good'>97</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-win'>S1+S2 WIN</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Chipped Propeller (M1 40% Thrust)</strong><br><small class='dim'>chipped_propeller</small></td>
+            <td><code>1.5x</code></td>
+            <td><span class='crash'>CRASH</span></td>
+            <td><span class='crash'>CRASH</span></td>
+            <td class='good'><strong>+9.4%</strong></td>
+            <td>0 vs <strong class='good'>0</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-win'>S1+S2 WIN</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Chipped Propeller (M1 40% Thrust)</strong><br><small class='dim'>chipped_propeller</small></td>
+            <td><code>2.0x</code></td>
+            <td><span class='crash'>CRASH</span></td>
+            <td><span class='crash'>CRASH</span></td>
+            <td class='good'><strong>+8.1%</strong></td>
+            <td>0 vs <strong class='good'>0</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-win'>S1+S2 WIN</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>6.5N Crosswind Microburst</strong><br><small class='dim'>microburst_wind</small></td>
+            <td><code>0.5x</code></td>
+            <td>1.017m</td>
+            <td><span class='good'>0.080m</span></td>
+            <td class='good'><strong>+92.2%</strong></td>
+            <td>63 vs <strong class='good'>85</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-win'>S1+S2 WIN</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>6.5N Crosswind Microburst</strong><br><small class='dim'>microburst_wind</small></td>
+            <td><code>1.0x</code></td>
+            <td>1.871m</td>
+            <td><span class='good'>0.195m</span></td>
+            <td class='good'><strong>+89.6%</strong></td>
+            <td>34 vs <strong class='good'>71</strong></td>
+            <td>2.27x</td>
+            <td><span class='badge badge-win'>S1+S2 WIN</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>6.5N Crosswind Microburst</strong><br><small class='dim'>microburst_wind</small></td>
+            <td><code>1.5x</code></td>
+            <td>2.475m</td>
+            <td><span class='good'>0.393m</span></td>
+            <td class='good'><strong>+84.1%</strong></td>
+            <td>24 vs <strong class='good'>56</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-win'>S1+S2 WIN</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>6.5N Crosswind Microburst</strong><br><small class='dim'>microburst_wind</small></td>
+            <td><code>2.0x</code></td>
+            <td><span class='crash'>CRASH</span></td>
+            <td><span class='crash'>CRASH</span></td>
+            <td class='good'><strong>+25.8%</strong></td>
+            <td>0 vs <strong class='good'>0</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-win'>S1+S2 WIN</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Tethered Cargo in 4.0N Wind</strong><br><small class='dim'>tethered_cargo_wind</small></td>
+            <td><code>0.5x</code></td>
+            <td>0.665m</td>
+            <td><span class='good'>0.351m</span></td>
+            <td class='good'><strong>+47.2%</strong></td>
+            <td>76 vs <strong class='good'>82</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-win'>S1+S2 WIN</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Tethered Cargo in 4.0N Wind</strong><br><small class='dim'>tethered_cargo_wind</small></td>
+            <td><code>1.0x</code></td>
+            <td>1.244m</td>
+            <td><span class='good'>0.714m</span></td>
+            <td class='good'><strong>+42.6%</strong></td>
+            <td>55 vs <strong class='good'>64</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-win'>S1+S2 WIN</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Tethered Cargo in 4.0N Wind</strong><br><small class='dim'>tethered_cargo_wind</small></td>
+            <td><code>1.5x</code></td>
+            <td>1.751m</td>
+            <td><span class='good'>1.093m</span></td>
+            <td class='good'><strong>+37.6%</strong></td>
+            <td>37 vs <strong class='good'>47</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-win'>S1+S2 WIN</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Tethered Cargo in 4.0N Wind</strong><br><small class='dim'>tethered_cargo_wind</small></td>
+            <td><code>2.0x</code></td>
+            <td>2.163m</td>
+            <td><span class='good'>0.866m</span></td>
+            <td class='good'><strong>+60.0%</strong></td>
+            <td>29 vs <strong class='good'>48</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-win'>S1+S2 WIN</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Severe IMU Sensor Chatter</strong><br><small class='dim'>sensor_chatter</small></td>
+            <td><code>0.5x</code></td>
+            <td>0.092m</td>
+            <td><span class='good'>0.192m</span></td>
+            <td class='bad'><strong>-108.0%</strong></td>
+            <td>97 vs <strong class='good'>93</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-loss'>S1 ONLY</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Severe IMU Sensor Chatter</strong><br><small class='dim'>sensor_chatter</small></td>
+            <td><code>1.0x</code></td>
+            <td>0.184m</td>
+            <td><span class='good'>0.390m</span></td>
+            <td class='bad'><strong>-111.9%</strong></td>
+            <td>93 vs <strong class='good'>87</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-loss'>S1 ONLY</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Severe IMU Sensor Chatter</strong><br><small class='dim'>sensor_chatter</small></td>
+            <td><code>1.5x</code></td>
+            <td>0.275m</td>
+            <td><span class='good'>0.587m</span></td>
+            <td class='bad'><strong>-113.2%</strong></td>
+            <td>90 vs <strong class='good'>80</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-loss'>S1 ONLY</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Severe IMU Sensor Chatter</strong><br><small class='dim'>sensor_chatter</small></td>
+            <td><code>2.0x</code></td>
+            <td>0.364m</td>
+            <td><span class='good'>0.785m</span></td>
+            <td class='bad'><strong>-115.6%</strong></td>
+            <td>86 vs <strong class='good'>74</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-loss'>S1 ONLY</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Compound Failure Stress Test</strong><br><small class='dim'>compound_stress</small></td>
+            <td><code>0.5x</code></td>
+            <td>0.763m</td>
+            <td><span class='good'>0.107m</span></td>
+            <td class='good'><strong>+86.0%</strong></td>
+            <td>72 vs <strong class='good'>88</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-win'>S1+S2 WIN</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Compound Failure Stress Test</strong><br><small class='dim'>compound_stress</small></td>
+            <td><code>1.0x</code></td>
+            <td>1.398m</td>
+            <td><span class='good'>0.524m</span></td>
+            <td class='good'><strong>+62.5%</strong></td>
+            <td>49 vs <strong class='good'>72</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-win'>S1+S2 WIN</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Compound Failure Stress Test</strong><br><small class='dim'>compound_stress</small></td>
+            <td><code>1.5x</code></td>
+            <td><span class='crash'>CRASH</span></td>
+            <td><span class='crash'>CRASH</span></td>
+            <td class='good'><strong>+57.9%</strong></td>
+            <td>0 vs <strong class='good'>0</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-win'>S1+S2 WIN</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Compound Failure Stress Test</strong><br><small class='dim'>compound_stress</small></td>
+            <td><code>2.0x</code></td>
+            <td><span class='crash'>CRASH</span></td>
+            <td><span class='crash'>CRASH</span></td>
+            <td class='good'><strong>+48.0%</strong></td>
+            <td>0 vs <strong class='good'>0</strong></td>
+            <td>1.00x</td>
+            <td><span class='badge badge-win'>S1+S2 WIN</span></td>
+        </tr>
+        
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+</body>
+</html>
