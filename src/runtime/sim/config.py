@@ -159,31 +159,7 @@ from runtime.config.system2_config import (
 # ==============================================================================
 # CHAOS INJECTION & FAILURE MODE SETTINGS
 # ==============================================================================
-<<<<<<< HEAD
-@dataclass
-class ChaosConfig:
-    """Configuration for simulated hardware failures and disturbances."""
-    # Chaos 1: Motor 1 Thrust Loss (Chipped propeller or ESC overheating)
-    # 0.40 means motor produces only 40% of commanded thrust (60% power cut)
-    motor_failure_multiplier: float = 0.40
-    
-    # Chaos 2: Physical Swinging Payload
-    # Mass of payload bob is 0.35 kg (26% of drone weight) attached on a 0.22m tether
-    # (F4: matches the true tether length in assets/skydio_x2/x2.xml: fromto 0 0 0 0 0 -0.22, bob at z -0.22)
-    payload_kick_angle_rad: float = 0.30   # Initial kick angle (~17 degrees)
-    payload_kick_velocity: float = 1.5     # Initial kick angular speed (rad/s)
-    
-    # Chaos 3: Sensor Noise (Vibration / noisy IMU)
-    # Adds zero-mean Gaussian noise to gyroscope angular velocity readings
-    sensor_noise_std: float = 0.8  # rad/s standard deviation (severe chatter without numeric NaN explosion)
-    
-    # Chaos 4: External Wind Gust
-    # Lateral push applied directly to the drone body
-    wind_gust_force_newtons: float = 5.0   # 5.0 N lateral force
-    wind_gust_duration_seconds: float = 0.80  # Duration of the gust
-=======
 from runtime.chaos.models import ChaosConfig
->>>>>>> origin/main
 
 
 # ==============================================================================

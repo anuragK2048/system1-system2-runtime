@@ -10,13 +10,13 @@ Implements:
 3. Sliding window summarizer producing structured TelemetrySummary.
 4. Non-blocking patch repository for System 2 control adjustments.
 
-Time basis (unified, see timing fix item 3): ALL trigger times, cooldowns, and
-expiry windows in this bridge use MuJoCo SIM time (data.time), which is
-deterministic headless and matches wall time in the realtime viewer. Wall time
-is used only to measure LLM call latency itself. System2Worker cooldowns and
-patch ages likewise use sim timestamps from TelemetrySummary.
+Time basis (see timing fix item 3): trigger times, trigger cooldowns, and the
+fault-onset correlation use MuJoCo SIM time (data.time), which is deterministic
+headless and matches wall time in the realtime viewer. Wall time is used for
+patch TTL expiry and to measure LLM call latency itself.
 """
 
+import time
 import threading
 from collections import deque
 from typing import Dict, List, Optional, Tuple, Deque
@@ -302,13 +302,10 @@ class System1System2Bridge:
             self._trigger_history.clear()
             self._trigger_event.clear()
             self._active_patch = None
-<<<<<<< HEAD
             self._last_trigger_sim_time = 0.0
             self._fault_onsets.clear()
             self._prev_fault_state.clear()
-=======
             self._patch_applied_time = None
->>>>>>> origin/main
 
     def get_telemetry_summary(self, window_seconds: Optional[float] = None) -> TelemetrySummary:
         """Computes statistical telemetry summary over the sliding window.
@@ -432,12 +429,8 @@ class System1System2Bridge:
             ValueError: If the patch has no diagnosis or non-numeric values.
         """
         with self._lock:
-<<<<<<< HEAD
             self._active_patch = validate_patch(patch)
-=======
-            self._active_patch = patch
             self._patch_applied_time = time.time()
->>>>>>> origin/main
 
     def clear_active_patch(self) -> None:
         """Removes the active patch, resetting System 1 to baseline."""
