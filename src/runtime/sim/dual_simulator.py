@@ -4,8 +4,8 @@ What does the Dual Simulator do?
 ---------------------------------
 This module allows running two independent drones in the exact same MuJoCo physics
 world simultaneously for real-time, side-by-side visual and quantitative comparison:
-1. Drone 1 (Left / Orange Accents): Configurable System 1 & System 2 setup.
-2. Drone 2 (Right / Cyan Accents): Configurable System 1 & System 2 setup.
+1. Drone 2 (Left / Cyan Accents): Configurable System 1 & System 2 setup.
+2. Drone 1 (Right / Orange Accents): Configurable System 1 & System 2 setup.
 3. Synchronized Chaos: Both drones experience the exact same failure events at the
    exact same instant (motor cuts, wind gusts, sensor noise, swinging payload).
 4. Auto-Tracking Camera: Keeps both drones framed in the 3D OpenGL viewport.
@@ -25,6 +25,8 @@ from runtime.sim.config import (
     PIDConfig,
     L1Config,
     ChaosConfig,
+    get_system_naming,
+    System2MasterConfig,
 )
 from runtime.sim.system1_controller import System1Controller
 from runtime.sim.chaos_injector import ChaosManager
@@ -60,6 +62,7 @@ class DualDroneSimulator:
         pid_cfg: Optional[PIDConfig] = None,
         l1_cfg: Optional[L1Config] = None,
         chaos_cfg: Optional[ChaosConfig] = None,
+        s2_cfg: Optional[System2MasterConfig] = None,
     ) -> None:
         self.drone1_mode = drone1_mode.lower().strip()
         self.drone2_mode = drone2_mode.lower().strip()
@@ -83,10 +86,18 @@ class DualDroneSimulator:
         self.drone_cfg = drone_cfg or DroneConfig()
         self.pid_cfg = pid_cfg or PIDConfig()
         self.l1_cfg = l1_cfg or L1Config()
+        self.s2_cfg = s2_cfg or System2MasterConfig()
         self.chaos = ChaosManager(cfg=chaos_cfg)
 
+        # Register with server state context for live WebSocket & REST control
+        try:
+            from runtime.server.state import sim_context
+            sim_context.attach_simulator(self)
+        except Exception:
+            pass
+
         # ----------------------------------------------------------------------
-        # Target Setpoints: Drone 1 (Left: Y = -1.2m), Drone 2 (Right: Y = +1.2m)
+        # Target Setpoints: Drone 2 (Left: Y = +1.2m), Drone 1 (Right: Y = -1.2m)
         # ----------------------------------------------------------------------
         target_z = self.drone_cfg.target_z
         self.d1_target = np.array([0.0, -1.2, target_z], dtype=np.float32)
@@ -104,6 +115,9 @@ class DualDroneSimulator:
             tilt_deg_threshold=self.l1_cfg.tilt_error_threshold_deg,
             gyro_norm_threshold=self.l1_cfg.gyro_rms_threshold,
             force_residual_threshold=self.l1_cfg.force_disturbance_threshold,
+            trigger_cfg=self.s2_cfg.trigger,
+            telemetry_cfg=self.s2_cfg.telemetry,
+            patch_cfg=self.s2_cfg.patch,
         )
         self.controller_1 = System1Controller(
             drone_cfg=self.drone_cfg,
@@ -112,6 +126,7 @@ class DualDroneSimulator:
             bridge=self.bridge_1,
             mode=d1_sys1_mode,
             target_pos=self.d1_target,
+            patch_cfg=self.s2_cfg.patch,
         )
 
         # ----------------------------------------------------------------------
@@ -123,6 +138,9 @@ class DualDroneSimulator:
             tilt_deg_threshold=self.l1_cfg.tilt_error_threshold_deg,
             gyro_norm_threshold=self.l1_cfg.gyro_rms_threshold,
             force_residual_threshold=self.l1_cfg.force_disturbance_threshold,
+            trigger_cfg=self.s2_cfg.trigger,
+            telemetry_cfg=self.s2_cfg.telemetry,
+            patch_cfg=self.s2_cfg.patch,
         )
         self.controller_2 = System1Controller(
             drone_cfg=self.drone_cfg,
@@ -131,6 +149,7 @@ class DualDroneSimulator:
             bridge=self.bridge_2,
             mode=d2_sys1_mode,
             target_pos=self.d2_target,
+            patch_cfg=self.s2_cfg.patch,
         )
 
         # ----------------------------------------------------------------------
@@ -150,14 +169,16 @@ class DualDroneSimulator:
                     bridge=self.bridge_1,
                     provider=self.llm_provider,
                     model=self.llm_model,
-                    drone_name="Drone 1 (Left)",
+                    drone_name="Drone 1 (Right / Orange)",
+                    master_cfg=self.s2_cfg,
                 )
             if self.d2_enable_system2:
                 self.worker_2 = System2Worker(
                     bridge=self.bridge_2,
                     provider=self.llm_provider,
                     model=self.llm_model,
-                    drone_name="Drone 2 (Right)",
+                    drone_name="Drone 2 (Left / Cyan)",
+                    master_cfg=self.s2_cfg,
                 )
 
         # ----------------------------------------------------------------------
@@ -241,6 +262,15 @@ class DualDroneSimulator:
         self.controller_2.reset_l1_state()
         self.bridge_1.reset()
         self.bridge_2.reset()
+        if self.worker_1:
+            self.worker_1.worker_state = "IDLE"
+        if self.worker_2:
+            self.worker_2.worker_state = "IDLE"
+
+        # Clear the kicked-payloads set so payloads receive their initial swing kick
+        # again after reset (previously this was only cleared by ChaosManager.clear_all,
+        # causing payloads to start with zero angle/velocity after a mid-run reset).
+        self.chaos._kicked_payloads.clear()
 
     def step_simulation(self, current_time: float) -> Tuple[dict, dict]:
         """Executes a single 500 Hz simulation step for both drones.
@@ -248,6 +278,7 @@ class DualDroneSimulator:
         Returns:
             Tuple of (telemetry_drone1, telemetry_drone2).
         """
+<<<<<<< HEAD
         # 0. Record fault on/off transitions for trigger timing correlation
         self.bridge_1.note_fault_state(self.chaos.active_chaos, float(self.data.time))
         self.bridge_2.note_fault_state(self.chaos.active_chaos, float(self.data.time))
@@ -275,30 +306,80 @@ class DualDroneSimulator:
         )
 
         # 2. Reset applied body forces and apply wind to BOTH drones
+=======
+        # 1. Reset applied body forces and generalized forces (drone bodies + payload bodies)
+>>>>>>> origin/main
         self.data.xfrc_applied[self.d1_body_id, :] = 0.0
         self.data.xfrc_applied[self.d2_body_id, :] = 0.0
+        self.data.xfrc_applied[self.d1_payload_id, :] = 0.0
+        self.data.xfrc_applied[self.d2_payload_id, :] = 0.0
         self.data.qfrc_applied[:] = 0.0
-        self.chaos.apply_wind_gust(self.data, self.d1_body_id, current_time)
-        self.chaos.apply_wind_gust(self.data, self.d2_body_id, current_time)
 
-        # 3. Read sensory state for Drone 1
+        sim_time = float(self.data.time)
+        dt = self.sim_cfg.physics_timestep
+
+        # 2. Read state BEFORE applying perturbations so crash disarm can gate wind on crashed drones
+        pos_1_pre = self.data.qpos[self.d1_qpos_adr : self.d1_qpos_adr + 3].copy()
+        quat_1_pre = self.data.qpos[self.d1_qpos_adr + 3 : self.d1_qpos_adr + 7].copy()
+        pos_2_pre = self.data.qpos[self.d2_qpos_adr : self.d2_qpos_adr + 3].copy()
+        quat_2_pre = self.data.qpos[self.d2_qpos_adr + 3 : self.d2_qpos_adr + 7].copy()
+
+        # Determine which drones are currently crashed / disarmed so wind is suppressed on them.
+        # This prevents a crashed drone with persistent wind from generating large contact impulses
+        # that can numerically destabilise the shared MuJoCo constraint solver and corrupt the
+        # hovering drone's physics state (root cause of the D1-crash → D2-falls-down bug).
+        def _is_crashed(pos: np.ndarray, quat: np.ndarray) -> bool:
+            qx, qy = quat[1], quat[2]
+            tilt = float(np.degrees(np.arccos(np.clip(1.0 - 2.0 * (qx**2 + qy**2), -1.0, 1.0))))
+            return (pos[2] < 0.12) or (pos[2] < 0.35 and tilt > 50.0) or (tilt > 85.0)
+
+        d1_crashed = _is_crashed(pos_1_pre, quat_1_pre)
+        d2_crashed = _is_crashed(pos_2_pre, quat_2_pre)
+
+        # 3. Apply physics perturbations (3D wind + payload aerodynamic drag) for Drone 1 & 2.
+        #    Skip wind application on any crashed drone to avoid destabilising contact impulses.
+        wind_f1 = self.chaos.apply_drone_physics(
+            drone_idx=1,
+            model=self.model,
+            data=self.data,
+            drone_body_id=self.d1_body_id,
+            payload_body_id=self.d1_payload_id,
+            tether_geom_id=self.d1_tether_id,
+            bob_geom_id=self.d1_bob_id,
+            sim_time=sim_time,
+            payload_qpos_adr=self.d1_payload_qpos_adr,
+            payload_qvel_adr=self.d1_payload_dof_adr,
+            suppress_wind=d1_crashed,
+        )
+        wind_f2 = self.chaos.apply_drone_physics(
+            drone_idx=2,
+            model=self.model,
+            data=self.data,
+            drone_body_id=self.d2_body_id,
+            payload_body_id=self.d2_payload_id,
+            tether_geom_id=self.d2_tether_id,
+            bob_geom_id=self.d2_bob_id,
+            sim_time=sim_time,
+            payload_qpos_adr=self.d2_payload_qpos_adr,
+            payload_qvel_adr=self.d2_payload_dof_adr,
+            suppress_wind=d2_crashed,
+        )
+
+        # 4. Read sensory state for Drone 1 (with sensor noise/vibrations)
         pos_1 = self.data.qpos[self.d1_qpos_adr : self.d1_qpos_adr + 3].copy()
         vel_1 = self.data.qvel[self.d1_dof_adr : self.d1_dof_adr + 3].copy()
         quat_1 = self.data.qpos[self.d1_qpos_adr + 3 : self.d1_qpos_adr + 7].copy()
         raw_omega_1 = self.data.sensordata[self.d1_gyro_adr : self.d1_gyro_adr + 3].copy()
-        omega_1 = self.chaos.corrupt_sensor_data(raw_omega_1)
+        omega_1 = self.chaos.corrupt_sensors_for_drone(1, raw_omega_1, sim_time=sim_time)
 
-        # 4. Read sensory state for Drone 2
+        # 5. Read sensory state for Drone 2 (with sensor noise/vibrations)
         pos_2 = self.data.qpos[self.d2_qpos_adr : self.d2_qpos_adr + 3].copy()
         vel_2 = self.data.qvel[self.d2_dof_adr : self.d2_dof_adr + 3].copy()
         quat_2 = self.data.qpos[self.d2_qpos_adr + 3 : self.d2_qpos_adr + 7].copy()
         raw_omega_2 = self.data.sensordata[self.d2_gyro_adr : self.d2_gyro_adr + 3].copy()
-        omega_2 = self.chaos.corrupt_sensor_data(raw_omega_2)
+        omega_2 = self.chaos.corrupt_sensors_for_drone(2, raw_omega_2, sim_time=sim_time)
 
-        # 5. Compute System 1 motor demands independently
-        sim_time = float(self.data.time)
-        dt = self.sim_cfg.physics_timestep
-
+        # 6. Compute System 1 motor demands independently
         thrust_1, diag_1 = self.controller_1.compute_motor_thrusts(
             pos_1, vel_1, quat_1, omega_1, sim_time=sim_time, dt=dt, target_pos=self.d1_target
         )
@@ -306,9 +387,25 @@ class DualDroneSimulator:
             pos_2, vel_2, quat_2, omega_2, sim_time=sim_time, dt=dt, target_pos=self.d2_target
         )
 
-        # 6. Apply hardware failure (Motor 1 degradation) to BOTH drones
-        actual_thrust_1 = self.chaos.degrade_actuators(thrust_1)
-        actual_thrust_2 = self.chaos.degrade_actuators(thrust_2)
+        # 7. Apply hardware failure / motor degradation per drone
+        actual_thrust_1 = self.chaos.degrade_actuators_for_drone(1, thrust_1, sim_time=sim_time)
+        actual_thrust_2 = self.chaos.degrade_actuators_for_drone(2, thrust_2, sim_time=sim_time)
+
+        # ----------------------------------------------------------------------
+        # Automatic Crash Disarm: Cut motor thrust to 0 upon ground contact or tumble.
+        # Prevents high-RPM rotors from driving inverted into the floor, eliminating
+        # contact impulse spikes and QACC warnings in MUJOCO_LOG.TXT.
+        # Uses pre-step positions (already computed above for wind suppression gate).
+        # ----------------------------------------------------------------------
+        qx1, qy1 = quat_1[1], quat_1[2]
+        tilt_deg_1 = float(np.degrees(np.arccos(np.clip(1.0 - 2.0 * (qx1**2 + qy1**2), -1.0, 1.0))))
+        if (pos_1[2] < 0.12) or (pos_1[2] < 0.35 and tilt_deg_1 > 50.0) or (tilt_deg_1 > 85.0):
+            actual_thrust_1 = np.zeros(4, dtype=np.float32)
+
+        qx2, qy2 = quat_2[1], quat_2[2]
+        tilt_deg_2 = float(np.degrees(np.arccos(np.clip(1.0 - 2.0 * (qx2**2 + qy2**2), -1.0, 1.0))))
+        if (pos_2[2] < 0.12) or (pos_2[2] < 0.35 and tilt_deg_2 > 50.0) or (tilt_deg_2 > 85.0):
+            actual_thrust_2 = np.zeros(4, dtype=np.float32)
 
         self.data.ctrl[self.d1_act_ids] = actual_thrust_1
         self.data.ctrl[self.d2_act_ids] = actual_thrust_2
@@ -316,8 +413,9 @@ class DualDroneSimulator:
         # 7. Step physics
         mujoco.mj_step(self.model, self.data)
 
-        # 8. Dynamic Camera Tracking Anchor (Midpoint between both drones)
-        self.data.xpos[self.anchor_body_id, :] = 0.5 * (pos_1 + pos_2)
+        # 8. Fixed Camera Tracking Anchor at Arena Midpoint [0, 0, 1.0]
+        # Anchoring to the fixed nominal midpoint ensures physical drift away from target pads is clearly visible in 3D
+        self.data.xpos[self.anchor_body_id, :] = np.array([0.0, 0.0, 1.0], dtype=np.float32)
 
         diag_1.update({
             "pos": pos_1,
@@ -326,6 +424,8 @@ class DualDroneSimulator:
             "omega": omega_1,
             "actual_thrust": actual_thrust_1,
             "target": self.d1_target,
+            "injected_wind_force": wind_f1,
+            "chaos_hud": self.chaos.get_hud_text(1),
         })
         diag_2.update({
             "pos": pos_2,
@@ -334,7 +434,16 @@ class DualDroneSimulator:
             "omega": omega_2,
             "actual_thrust": actual_thrust_2,
             "target": self.d2_target,
+            "injected_wind_force": wind_f2,
+            "chaos_hud": self.chaos.get_hud_text(2),
         })
+
+        # Record latest telemetry into server context for WebSocket streaming
+        try:
+            from runtime.server.state import sim_context
+            sim_context.record_telemetry(diag_1, diag_2)
+        except Exception:
+            pass
 
         return diag_1, diag_2
 
@@ -359,42 +468,85 @@ class DualDroneSimulator:
             with mujoco.viewer.launch_passive(
                 self.model, self.data, key_callback=self.chaos.handle_key
             ) as viewer:
-                # Camera tracks the anchor between both drones
+                # Hide side panels by default for clean split-screen viewing (press [Tab] in viewer to toggle)
+                if hasattr(viewer, "_get_sim"):
+                    try:
+                        sim_obj = viewer._get_sim()
+                        if hasattr(sim_obj, "ui0_enable"):
+                            sim_obj.ui0_enable = 0
+                        if hasattr(sim_obj, "ui1_enable"):
+                            sim_obj.ui1_enable = 0
+                    except Exception:
+                        pass
+
+                # Camera tracks the anchor between both drones (Azimuth 0.0 frames Left=Cyan, Right=Orange side-by-side)
                 viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
                 viewer.cam.trackbodyid = self.anchor_body_id
-                viewer.cam.distance = 4.2
+                viewer.cam.distance = 4.5
                 viewer.cam.elevation = -12.0
-                viewer.cam.azimuth = 90.0
+                viewer.cam.azimuth = 0.0
 
                 physics_dt = self.sim_cfg.physics_timestep
                 render_interval = 1.0 / self.sim_cfg.render_fps
                 last_render = time.time()
                 last_print = time.time()
+                sim_wall_start = time.time()
+                sim_start_time = float(self.data.time)
+
+                tele_1 = {}
+                tele_2 = {}
 
                 while viewer.is_running():
-                    step_start = time.time()
                     now = time.time()
 
                     if self.chaos.reset_requested:
                         self.reset_simulation()
                         self.chaos.reset_requested = False
+                        sim_wall_start = time.time()
+                        sim_start_time = float(self.data.time)
 
-                    tele_1, tele_2 = self.step_simulation(now)
+                    # Real-time wall clock synchronization:
+                    # Advance 500 Hz physics steps to match elapsed real-world time at 1.0x real speed
+                    target_sim_time = sim_start_time + (now - sim_wall_start)
+                    substeps = 0
+                    while float(self.data.time) < target_sim_time and substeps < 25:
+                        tele_1, tele_2 = self.step_simulation(float(self.data.time))
+                        substeps += 1
 
-                    # 60 FPS Render Sync
+                    # Soft resync if physics lagged behind >60ms (e.g. window moved or OS sleep)
+                    if (target_sim_time - float(self.data.time)) > 0.060:
+                        sim_wall_start = time.time()
+                        sim_start_time = float(self.data.time)
+
+                    # 60 FPS Render Sync & In-Viewer HUD Update
                     if now - last_render >= render_interval:
                         viewer.opt.geomgroup[0:3] = 1
+
+                        # Render in-viewer HUD text overlays (One on TOP, one on BOTTOM to prevent collision on split-screen)
+                        d2_name = get_system_naming(self.drone2_mode)["system_short"]
+                        d1_name = get_system_naming(self.drone1_mode)["system_short"]
+                        hud_d2 = f"Left [Cyan - {d2_name}]: {tele_2.get('chaos_hud', '')}"
+                        hud_d1 = f"Right [Orange - {d1_name}]: {tele_1.get('chaos_hud', '')}"
+                        viewer.set_texts([
+                            (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_TOPLEFT, hud_d2, ""),
+                            (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_BOTTOMLEFT, hud_d1, ""),
+                        ])
+
                         viewer.sync()
                         last_render = now
 
                     # Telemetry Logging
                     if now - last_print > self.sim_cfg.telemetry_print_interval:
-                        self._print_comparative_telemetry(tele_1, tele_2)
+                        if tele_1 and tele_2:
+                            self._print_comparative_telemetry(tele_1, tele_2)
                         last_print = now
 
-                    time_until_next = physics_dt - (time.time() - step_start)
-                    if time_until_next > 0:
-                        time.sleep(time_until_next)
+                    # Yield CPU briefly to OS and background Web server
+                    time_ahead = float(self.data.time) - (time.time() - sim_wall_start + sim_start_time)
+                    if time_ahead > 0:
+                        time.sleep(min(time_ahead, 0.002))
+                    else:
+                        time.sleep(0.0005)
 
         finally:
             if self.worker_1:
@@ -460,11 +612,13 @@ class DualDroneSimulator:
         stat1 = "💥 CRASH" if pos1[2] < 0.15 else ("🚨 DRIFT" if err1 > 0.40 else "🟢 HOVER")
         stat2 = "💥 CRASH" if pos2[2] < 0.15 else ("🚨 DRIFT" if err2 > 0.40 else "🟢 HOVER")
 
-        d1_label = f"D1 ({self.drone1_mode})"[:20]
-        d2_label = f"D2 ({self.drone2_mode})"[:20]
+        d2_naming = get_system_naming(self.drone2_mode)
+        d1_naming = get_system_naming(self.drone1_mode)
+        d2_label = f"Left [Cyan / D2: {d2_naming['system_short']}]"
+        d1_label = f"Right [Orange / D1: {d1_naming['system_short']}]"
 
         print(
-            f"[{stat1}] {d1_label:<20} | Pos=({pos1[0]:+.2f},{pos1[1]:+.2f}) Alt={pos1[2]:.2f}m Err={err1:.2f}m Roll={roll1:+.1f}°{l1_str1}{p1_str}\n"
-            f"[{stat2}] {d2_label:<20} | Pos=({pos2[0]:+.2f},{pos2[1]:+.2f}) Alt={pos2[2]:.2f}m Err={err2:.2f}m Roll={roll2:+.1f}°{l1_str2}{p2_str}"
+            f"[{stat2}] {d2_label:<35} | Pos=({pos2[0]:+.2f},{pos2[1]:+.2f}) Alt={pos2[2]:.2f}m Err={err2:.2f}m Roll={roll2:+.1f}°{l1_str2}{p2_str}\n"
+            f"[{stat1}] {d1_label:<35} | Pos=({pos1[0]:+.2f},{pos1[1]:+.2f}) Alt={pos1[2]:.2f}m Err={err1:.2f}m Roll={roll1:+.1f}°{l1_str1}{p1_str}"
         )
-        print("-" * 78)
+        print("-" * 88)

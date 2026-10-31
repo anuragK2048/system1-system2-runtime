@@ -23,6 +23,7 @@ from runtime.sim.config import (
     PIDConfig,
     L1Config,
     ChaosConfig,
+    System2MasterConfig,
 )
 from runtime.sim.system1_controller import System1Controller
 from runtime.sim.chaos_injector import ChaosManager
@@ -50,6 +51,7 @@ class DroneSimulator:
         l1_cfg: Optional[L1Config] = None,
         bridge: Optional[System1System2Bridge] = None,
         controller_mode: str = "l1_adaptive",
+        s2_cfg: Optional[System2MasterConfig] = None,
     ) -> None:
         self.scene_path = scene_path or SCENE_PATH
         if not self.scene_path.exists():
@@ -57,12 +59,19 @@ class DroneSimulator:
 
         self.sim_cfg = sim_cfg or SimConfig()
         self.drone_cfg = drone_cfg or DroneConfig()
+        self.s2_cfg = s2_cfg or System2MasterConfig()
+        effective_bridge = bridge or System1System2Bridge(
+            trigger_cfg=self.s2_cfg.trigger,
+            telemetry_cfg=self.s2_cfg.telemetry,
+            patch_cfg=self.s2_cfg.patch,
+        )
         self.controller = System1Controller(
             drone_cfg=self.drone_cfg,
             l1_cfg=l1_cfg,
             pid_cfg=pid_cfg,
-            bridge=bridge,
+            bridge=effective_bridge,
             mode=controller_mode,
+            patch_cfg=self.s2_cfg.patch,
         )
         self.bridge = self.controller.bridge
         self.chaos = ChaosManager(cfg=chaos_cfg)
@@ -163,6 +172,13 @@ class DroneSimulator:
 
         # 6. Apply actuator degradation if Motor 1 failure is active
         actual_thrust = self.chaos.degrade_actuators(commanded_thrust)
+
+        # Automatic Crash Disarm: Cut motor thrust to 0 upon ground impact/tumble
+        qx, qy = quat[1], quat[2]
+        tilt_deg = float(np.degrees(np.arccos(np.clip(1.0 - 2.0 * (qx**2 + qy**2), -1.0, 1.0))))
+        if (pos[2] < 0.12) or (pos[2] < 0.35 and tilt_deg > 50.0) or (tilt_deg > 85.0):
+            actual_thrust = np.zeros(4, dtype=np.float32)
+
         self.data.ctrl[:] = actual_thrust
 
         # 7. Step physics in MuJoCo
@@ -185,6 +201,16 @@ class DroneSimulator:
         with mujoco.viewer.launch_passive(
             self.model, self.data, key_callback=self.chaos.handle_key
         ) as viewer:
+            # Hide side panels by default for clean split-screen viewing (press [Tab] in viewer to toggle)
+            if hasattr(viewer, "_get_sim"):
+                try:
+                    sim_obj = viewer._get_sim()
+                    if hasattr(sim_obj, "ui0_enable"):
+                        sim_obj.ui0_enable = 0
+                    if hasattr(sim_obj, "ui1_enable"):
+                        sim_obj.ui1_enable = 0
+                except Exception:
+                    pass
             # Configure auto-tracking camera to keep drone centered
             viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
             viewer.cam.trackbodyid = self.drone_body_id

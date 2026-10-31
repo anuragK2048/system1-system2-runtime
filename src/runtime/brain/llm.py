@@ -34,6 +34,11 @@ from runtime.schemas.tier2 import System2Patch, GainMultipliers, SafetyEnvelope
 from runtime.schemas.telemetry import TelemetrySummary, FastTriggerEvent
 from runtime.sim.bridge import System1System2Bridge
 from runtime.logging import LLMLogger, get_llm_logger
+from runtime.config.system2_config import (
+    System2InferenceConfig,
+    System2WorkerConfig,
+    System2MasterConfig,
+)
 
 # Load environment variables (.env)
 load_dotenv()
@@ -45,7 +50,7 @@ load_dotenv()
 # equivalently ~1.20x on the three healthy motors (missing 1.95 N / 3 = 0.65 N
 # each: 3.25 -> 3.90 N). The old prompt value 1.60x only restored 64% of M1.
 SYSTEM_PROMPT = """You are the System 2 Autonomous Flight Reasoner for a Skydio X2 quadrotor.
-CRITICAL INSTRUCTION: Output valid JSON immediately. Keep reasoning under 50 words.
+CRITICAL INSTRUCTION: Output raw JSON immediately. No reasoning, no chain-of-thought, no markdown codeblocks. Keep diagnosis concise (under 20 words).
 
 Physical Specifications:
 - Mass: 1.325 kg, total hover weight W = mg ≈ 13.0 N.
@@ -118,7 +123,8 @@ class System2Brain:
 
     Supported providers:
       - 'groq': Ultra-fast Groq Cloud (~1.0s latency, default model: 'openai/gpt-oss-120b')
-      - 'baseten': Baseten endpoint (default model: 'meta-models/muse-spark-open-1026')
+      - 'baseten': Baseten endpoint (default model: 'deepseek-ai/DeepSeek-V4.1-Flash-Fast')
+      - 'fireworks': Fireworks AI (default model: 'accounts/fireworks/models/deepseek-v4p1-flash')
       - 'openai': OpenAI or custom OpenAI-compatible endpoint
     """
 
@@ -129,10 +135,14 @@ class System2Brain:
         base_url: Optional[str] = None,
         model: Optional[str] = None,
         logger: Optional[LLMLogger] = None,
+        inference_cfg: Optional[System2InferenceConfig] = None,
     ) -> None:
-        # Determine provider: parameter -> LLM_PROVIDER env -> auto-detect -> default 'groq'
+        self.inference_cfg = inference_cfg or System2InferenceConfig()
+
+        # Determine provider: parameter -> inference_cfg -> LLM_PROVIDER env -> auto-detect -> default 'groq'
         env_provider = os.getenv("LLM_PROVIDER")
-        self.provider = (provider or env_provider or "").lower().strip()
+        chosen_provider = provider or self.inference_cfg.provider or env_provider or ""
+        self.provider = chosen_provider.lower().strip()
         if not self.provider:
             if os.getenv("GROQ_API_KEY"):
                 self.provider = "groq"
@@ -143,6 +153,7 @@ class System2Brain:
 
         self.logger = logger or get_llm_logger()
         self.base_url = base_url
+        override_model = model or self.inference_cfg.model
 
         if self.provider == "groq":
             self.api_key = api_key or os.getenv("GROQ_API_KEY")
@@ -151,21 +162,41 @@ class System2Brain:
                     "GROQ_API_KEY not found in environment or .env file! "
                     "Please configure GROQ_API_KEY to enable System 2 LLM reasoning."
                 )
-            self.model = model or os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+            self.model = override_model or os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
             from groq import Groq
             self.client = Groq(api_key=self.api_key)
 
         elif self.provider == "baseten":
-            self.api_key = api_key or os.getenv("BASETEN_API_KEY")
+            self.model = override_model or os.getenv("BASETEN_MODEL", "meta-models/muse-spark-open-1026")
+            if "muse" in self.model.lower() and os.getenv("BASETEN_API_KEY_META"):
+                self.api_key = api_key or os.getenv("BASETEN_API_KEY_META")
+            else:
+                self.api_key = api_key or os.getenv("BASETEN_API_KEY")
+
             if not self.api_key:
                 raise ValueError(
-                    "BASETEN_API_KEY not found in environment or .env file! "
+                    "BASETEN_API_KEY or BASETEN_API_KEY_META not found in environment or .env file! "
                     "Please configure BASETEN_API_KEY to enable System 2 LLM reasoning."
                 )
             self.base_url = self.base_url or os.getenv(
                 "BASETEN_BASE_URL", "https://inference.baseten.co/v1"
             )
-            self.model = model or os.getenv("BASETEN_MODEL", "meta-models/muse-spark-open-1026")
+            self.client = OpenAI(
+                base_url=self.base_url,
+                api_key=self.api_key,
+            )
+
+        elif self.provider in ("fireworks", "firework"):
+            self.api_key = api_key or os.getenv("FIREWORK_API_KEY") or os.getenv("FIREWORKS_API_KEY")
+            if not self.api_key:
+                raise ValueError(
+                    "FIREWORK_API_KEY not found in environment or .env file! "
+                    "Please configure FIREWORK_API_KEY to enable Fireworks AI reasoning."
+                )
+            self.base_url = self.base_url or os.getenv(
+                "FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1"
+            )
+            self.model = override_model or os.getenv("FIREWORKS_MODEL", "accounts/fireworks/models/deepseek-v4p1-flash")
             self.client = OpenAI(
                 base_url=self.base_url,
                 api_key=self.api_key,
@@ -176,7 +207,7 @@ class System2Brain:
             if not self.api_key:
                 raise ValueError("OPENAI_API_KEY not found in environment or .env file!")
             self.base_url = self.base_url or os.getenv("OPENAI_BASE_URL")
-            self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+            self.model = override_model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
             kwargs = {"api_key": self.api_key}
             if self.base_url:
                 kwargs["base_url"] = self.base_url
@@ -185,8 +216,42 @@ class System2Brain:
         else:
             raise ValueError(
                 f"Unsupported LLM provider '{self.provider}'. "
-                f"Supported providers: 'groq', 'baseten', 'openai'."
+                f"Supported providers: 'groq', 'baseten', 'fireworks', 'openai'."
             )
+
+        # Telemetry & observability fields
+        self.last_call_dispatched_at: Optional[float] = None
+        self.last_call_received_at: Optional[float] = None
+        self.last_latency_s: Optional[float] = None
+        self.in_flight: bool = False
+        self.call_count: int = 0
+        self._seed_latest_call_from_log()
+
+    def _seed_latest_call_from_log(self) -> None:
+        """Seeds latest call stats from log file so telemetry starts populated."""
+        try:
+            from pathlib import Path
+            log_p = Path(getattr(self.logger, "jsonl_path", "logs/llm_calls.jsonl"))
+            if not log_p.exists():
+                return
+            with open(log_p, "rb") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                if size == 0:
+                    return
+                f.seek(-min(size, 8192), 2)
+                lines = f.read().decode("utf-8", errors="ignore").strip().splitlines()
+                if not lines:
+                    return
+                last = json.loads(lines[-1])
+                duration = float(last.get("duration_s", 0.0))
+                ts_unix = float(last.get("timestamp_unix", 0.0))
+                if ts_unix > 0:
+                    self.last_latency_s = duration
+                    self.last_call_received_at = ts_unix
+                    self.last_call_dispatched_at = ts_unix - duration
+        except Exception:
+            pass
 
     def analyze_and_patch(
         self,
@@ -206,6 +271,9 @@ class System2Brain:
         user_prompt = summary.format_llm_text(trigger_header=trigger_header)
 
         start_t = time.time()
+        self.last_call_dispatched_at = start_t
+        self.in_flight = True
+
         prompt_tokens = 0
         completion_tokens = 0
         total_tokens = 0
@@ -213,6 +281,7 @@ class System2Brain:
         raw_text = None
         reasoning = None
 
+<<<<<<< HEAD
         # Timing metadata recorded into logs/llm_calls.jsonl for every call.
         timing_metadata: Dict[str, Any] = {
             "fault_type": trigger_event.fault_type if trigger_event else None,
@@ -220,23 +289,35 @@ class System2Brain:
             "trigger_sim_time": trigger_event.timestamp if trigger_event else None,
             "summary_sim_time": summary.timestamp,
         }
+=======
+        effective_prompt = self.inference_cfg.system_prompt or SYSTEM_PROMPT
+>>>>>>> origin/main
 
         try:
             call_kwargs = {
                 "model": self.model,
                 "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": effective_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                "temperature": 0.2,
+                "temperature": self.inference_cfg.temperature,
             }
+            if self.inference_cfg.seed is not None:
+                call_kwargs["seed"] = self.inference_cfg.seed
+            if self.inference_cfg.enable_json_mode:
+                call_kwargs["response_format"] = {"type": "json_object"}
+
             if self.provider == "groq":
-                call_kwargs["max_completion_tokens"] = 2048
+                call_kwargs["max_completion_tokens"] = self.inference_cfg.groq_max_completion_tokens
             else:
-                call_kwargs["max_tokens"] = 4096
+                call_kwargs["max_tokens"] = self.inference_cfg.general_max_tokens
 
             response = self.client.chat.completions.create(**call_kwargs)
             elapsed_s = time.time() - start_t
+            self.last_call_received_at = time.time()
+            self.last_latency_s = elapsed_s
+            self.in_flight = False
+            self.call_count += 1
 
             # Extract token usage if returned by endpoint
             if response.usage:
@@ -295,6 +376,10 @@ class System2Brain:
 
         except Exception as e:
             elapsed_s = time.time() - start_t
+            self.last_call_received_at = time.time()
+            self.last_latency_s = elapsed_s
+            self.in_flight = False
+            self.call_count += 1
             print(f"⚠️ [SYSTEM 2 LLM ERROR - {self.provider.upper()}] Failed to generate control patch: {e}")
 
             # Log failed transaction
@@ -368,19 +453,37 @@ class System2Worker:
         brain: Optional[System2Brain] = None,
         provider: Optional[str] = None,
         model: Optional[str] = None,
-        cooldown_s: float = 2.0,
+        cooldown_s: Optional[float] = None,
         drone_name: str = "Drone",
+        worker_cfg: Optional[System2WorkerConfig] = None,
+        master_cfg: Optional[System2MasterConfig] = None,
     ) -> None:
         self.bridge = bridge
+<<<<<<< HEAD
         self.brain = brain or System2Brain(provider=provider, model=model)
         self.cooldown_s = cooldown_s  # sim seconds between LLM calls
+=======
+        self.master_cfg = master_cfg
+        self.worker_cfg = worker_cfg or (master_cfg.worker if master_cfg else None) or System2WorkerConfig()
+        if cooldown_s is not None:
+            self.worker_cfg.cooldown_s = cooldown_s
+        self.cooldown_s = self.worker_cfg.cooldown_s
+>>>>>>> origin/main
         self.drone_name = drone_name
+
+        inference_cfg = master_cfg.inference if master_cfg else None
+        self.brain = brain or System2Brain(provider=provider, model=model, inference_cfg=inference_cfg)
 
         self._running = False
         self._thread: Optional[threading.Thread] = None
+<<<<<<< HEAD
         self._last_call_sim_time = 0.0
         self._patch_applied_sim_time = 0.0
         self._patch_notified_stable = False
+=======
+        self._last_call_time = 0.0
+        self.worker_state: str = "IDLE"
+>>>>>>> origin/main
 
     def start(self) -> None:
         """Launches the System 2 background monitoring thread."""
@@ -427,6 +530,7 @@ class System2Worker:
         """Main loop executed in background thread."""
         while self._running:
             try:
+<<<<<<< HEAD
                 # The 1.0 s summary is kept for the LLM prompt, but the decision
                 # to call uses the instant (50 ms) force estimate as well, so a
                 # fast fault does not wait for a full 1.0 s mean to build up.
@@ -434,6 +538,18 @@ class System2Worker:
 
                 # Skip initial spawn warmup (first 1.0s of physics)
                 if summary.timestamp < 1.0 or summary.samples_count < 200:
+=======
+                # Check if cooldown interval has passed before consuming triggers
+                now = time.time()
+                if (now - self._last_call_time) < self.cooldown_s:
+                    time.sleep(0.1)
+                    continue
+
+                summary = self.bridge.get_telemetry_summary()
+                
+                # Skip initial spawn warmup (configured minimum timestamp & samples)
+                if summary.timestamp < self.worker_cfg.warmup_min_timestamp or summary.samples_count < self.worker_cfg.warmup_min_samples:
+>>>>>>> origin/main
                     time.sleep(0.1)
                     continue
 
@@ -448,6 +564,30 @@ class System2Worker:
                 moment_dist_norm = (summary.unmodeled_moment_disturbance[0]**2 + summary.unmodeled_moment_disturbance[1]**2 + summary.unmodeled_moment_disturbance[2]**2) ** 0.5
                 triggered = self.bridge.is_triggered()
 
+                # --------------------------------------------------------------
+                # Crash Safety Guard: Stop System 2 calls immediately if drone crashed
+                # --------------------------------------------------------------
+                alt = float(1.0 - summary.pos_error[2])
+                tilt = float((summary.roll_deg**2 + summary.pitch_deg**2) ** 0.5)
+                is_crashed = (
+                    alt < self.worker_cfg.crash_alt_min
+                    or (alt < self.worker_cfg.crash_tilt_near_ground_alt and tilt > self.worker_cfg.crash_tilt_near_ground_deg)
+                    or tilt > self.worker_cfg.crash_tilt_extreme_deg
+                    or pos_err_norm > self.worker_cfg.crash_runaway_pos_error
+                )
+
+                if is_crashed:
+                    if self.worker_state != "CRASHED":
+                        self.worker_state = "CRASHED"
+                        print(f"\n💥 [SYSTEM 2 - {self.drone_name.upper()}] Drone crash / ground contact detected (Alt={alt:.2f}m, Tilt={tilt:.1f}°). Halting System 2 reasoning calls.")
+                    self.bridge.clear_trigger()
+                    time.sleep(0.4)
+                    continue
+                elif self.worker_state == "CRASHED":
+                    # Drone recovered / user reset simulation back into hover
+                    self.worker_state = "IDLE"
+                    print(f"🔄 [SYSTEM 2 - {self.drone_name.upper()}] Drone recovered to nominal hover envelope. Resuming System 2 monitoring.\n")
+
                 active_patch = self.bridge.get_active_patch()
 
                 if active_patch is None:
@@ -456,17 +596,29 @@ class System2Worker:
                     # --------------------------------------------------------------
                     needs_attention = (
                         triggered
+<<<<<<< HEAD
                         or pos_err_norm > 0.30
                         or force_dist_norm > 2.5
                         or instant_force_norm > 2.5
                         or moment_dist_norm > 0.35
                         or summary.oscillation_detected
+=======
+                        or pos_err_norm > self.worker_cfg.attention_pos_error
+                        or force_dist_norm > self.worker_cfg.attention_force_disturbance
+                        or moment_dist_norm > self.worker_cfg.attention_moment_disturbance
+                        or (summary.oscillation_detected and self.worker_cfg.attention_oscillation)
+>>>>>>> origin/main
                     )
 
                     if needs_attention:
                         trigger_event = self.bridge.get_latest_trigger_event(max_age_s=3.0, current_time=summary.timestamp)
                         self.bridge.clear_trigger()
+<<<<<<< HEAD
                         self._last_call_sim_time = summary.timestamp
+=======
+                        self._last_call_time = now
+                        self.worker_state = "REASONING"
+>>>>>>> origin/main
 
                         # Query LLM asynchronously
                         llm_start = time.time()
@@ -476,7 +628,11 @@ class System2Worker:
                             self.bridge.apply_system2_patch(patch)
                             self._patch_applied_sim_time = summary.timestamp
                             self._patch_notified_stable = False
+<<<<<<< HEAD
                             self._print_timing(trigger_event, summary.timestamp, llm_wall_s)
+=======
+                            self.worker_state = "PATCH_APPLIED"
+>>>>>>> origin/main
                             print(f"\n✨ [SYSTEM 2 - {self.drone_name.upper()}] Applied Control Patch to System 1:")
                             print(f"   Diagnosis: {patch.diagnosis}")
                             if patch.feedforward_force_offset and any(abs(x) > 0.01 for x in patch.feedforward_force_offset):
@@ -485,6 +641,8 @@ class System2Worker:
                                  print(f"   Motor Trim: {patch.motor_trim_scale}")
                             if patch.gain_multipliers:
                                  print(f"   Gain Multipliers: {patch.gain_multipliers}\n")
+                        else:
+                            self.worker_state = "IDLE"
 
                 else:
                     # --------------------------------------------------------------
@@ -494,25 +652,37 @@ class System2Worker:
 
                     # Check if disturbance has ended and flight is back to calm nominal hover
                     calm_hover = (
-                        pos_err_norm < 0.15
-                        and force_dist_norm < 1.0
-                        and moment_dist_norm < 0.20
+                        pos_err_norm < self.worker_cfg.calm_pos_error
+                        and force_dist_norm < self.worker_cfg.calm_force_disturbance
+                        and moment_dist_norm < self.worker_cfg.calm_moment_disturbance
                         and not summary.oscillation_detected
                     )
 
                     if calm_hover:
+<<<<<<< HEAD
                         if (summary.timestamp - self._last_call_sim_time) > 2.5:
+=======
+                        if (now - self._last_call_time) > self.worker_cfg.calm_min_settle_time_s:
+>>>>>>> origin/main
                             self.bridge.clear_active_patch()
+                            self.worker_state = "IDLE"
                             print(f"\n🟢 [SYSTEM 2 - {self.drone_name.upper()}] Disturbance ended & flight nominal. Resetting System 1 control law to baseline.\n")
                             self._last_call_sim_time = summary.timestamp
                             self._patch_notified_stable = False
                     else:
                         # Disturbance is still active. Is the active patch holding flight stable?
+<<<<<<< HEAD
                         is_stable = (pos_err_norm < 0.30) and not summary.oscillation_detected
                         if is_stable and not self._patch_notified_stable:
+=======
+                        is_stable = (pos_err_norm < self.worker_cfg.stable_pos_error) and not summary.oscillation_detected
+                        if is_stable and not getattr(self, "_patch_notified_stable", False):
+>>>>>>> origin/main
                             print(f"🎯 [SYSTEM 2 - {self.drone_name.upper()}] Active control patch holding flight stable against disturbance. Monitoring...\n")
                             self._patch_notified_stable = True
+                            self.worker_state = "STABLE"
 
+<<<<<<< HEAD
                         # Re-check the patch at 2 s (not 6 s): if position error
                         # is still > 0.5 m or oscillation continues, re-consult.
                         patch_age = summary.timestamp - self._patch_applied_sim_time
@@ -523,21 +693,60 @@ class System2Worker:
                             trigger_event = self.bridge.get_latest_trigger_event(max_age_s=3.0, current_time=summary.timestamp)
                             self._last_call_sim_time = summary.timestamp
                             llm_start = time.time()
+=======
+                        # Only re-consult LLM if drone severely diverges or oscillates after threshold seconds
+                        patch_age = now - getattr(self, "_patch_applied_time", now)
+                        severe_divergence = (pos_err_norm > self.worker_cfg.reconsult_pos_error) or (
+                            summary.oscillation_detected and patch_age > self.worker_cfg.reconsult_oscillation_age_s
+                        )
+
+                        if severe_divergence and patch_age > self.worker_cfg.reconsult_min_patch_age_s:
+                            print(f"⚠️ [SYSTEM 2 - {self.drone_name.upper()}] Active patch insufficient; re-consulting LLM to revise control law...")
+                            trigger_event = self.bridge.get_latest_trigger_event(max_age_s=2.0, current_time=summary.timestamp)
+                            self._last_call_time = now
+                            self.worker_state = "REASONING"
+>>>>>>> origin/main
                             revised_patch = self.brain.analyze_and_patch(summary, trigger_event)
                             llm_wall_s = time.time() - llm_start
                             if revised_patch:
                                 self.bridge.apply_system2_patch(revised_patch)
+<<<<<<< HEAD
                                 self._patch_applied_sim_time = summary.timestamp
                                 self._print_timing(trigger_event, summary.timestamp, llm_wall_s)
+=======
+                                self._patch_applied_time = now
+                                self.worker_state = "PATCH_APPLIED"
+>>>>>>> origin/main
                                 print(f"\n🔄 [SYSTEM 2 - {self.drone_name.upper()}] Revised Control Patch:")
                                 print(f"   Diagnosis: {revised_patch.diagnosis}\n")
+                            else:
+                                self.worker_state = "STABLE"
 
             except Exception as e:
                 import traceback
                 print(f"⚠️ [SYSTEM 2 - {self.drone_name.upper()} WORKER ERROR] {e}")
                 traceback.print_exc()
 
-            time.sleep(0.05)
+            time.sleep(self.worker_cfg.loop_poll_interval_s)
+
+    def get_status_dict(self) -> Dict[str, Any]:
+        """Returns snapshot of System 2 LLM latency, timestamps, and patch lifecycle."""
+        patch_applied_t = self.bridge.get_patch_applied_time()
+        patch_age = self.bridge.get_patch_age_s()
+        return {
+            "drone_name": self.drone_name,
+            "provider": self.brain.provider,
+            "model": self.brain.model,
+            "worker_state": self.worker_state,
+            "in_flight": self.brain.in_flight,
+            "last_latency_s": round(self.brain.last_latency_s, 3) if self.brain.last_latency_s is not None else None,
+            "last_call_dispatched_at": self.brain.last_call_dispatched_at,
+            "last_call_received_at": self.brain.last_call_received_at,
+            "call_count": self.brain.call_count,
+            "patch_applied_time": patch_applied_t,
+            "patch_age_s": round(patch_age, 2) if patch_age is not None else None,
+            "provider_usage": self.brain.logger.get_provider_usage_summary(),
+        }
 
 
 def run_test() -> None:

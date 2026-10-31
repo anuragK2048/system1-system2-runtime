@@ -24,12 +24,14 @@ This controller integrates Mini-QuadLib, implementing:
    Quadrotors With Performance Guarantees' (IEEE TCST, 2025).
 """
 
+import time
 from typing import Optional, Tuple, Dict, Any, List
 import numpy as np
 
 from runtime.sim.config import DroneConfig, PIDConfig, L1Config
 from runtime.sim.bridge import System1System2Bridge
 from runtime.schemas.tier2 import System2Patch
+from runtime.config.system2_config import PatchApplicationConfig
 from runtime.quadlib import (
     Quaternion,
     RotationMatrix,
@@ -67,6 +69,7 @@ class System1Controller:
         bridge: Optional[System1System2Bridge] = None,
         mode: str = "l1_adaptive",
         target_pos: Optional[np.ndarray] = None,
+        patch_cfg: Optional[PatchApplicationConfig] = None,
     ) -> None:
         self.drone_cfg = drone_cfg or DroneConfig()
         self.l1_cfg = l1_cfg or L1Config()
@@ -77,6 +80,7 @@ class System1Controller:
             gyro_norm_threshold=self.l1_cfg.gyro_rms_threshold,
             force_residual_threshold=self.l1_cfg.force_disturbance_threshold,
         )
+        self.patch_cfg = patch_cfg or getattr(self.bridge, "patch_cfg", None) or PatchApplicationConfig()
         self.mode = mode
         self.target_pos = (
             np.array(target_pos, dtype=np.float32)
@@ -111,6 +115,82 @@ class System1Controller:
     def reset_l1_state(self) -> None:
         """Resets the L1 adaptive observer state back to zero."""
         self.l1_state = L1AdaptiveState()
+
+    def _resolve_active_patch(
+        self,
+        sim_time: float,
+        explicit_ff: Optional[np.ndarray],
+        explicit_trim: Optional[np.ndarray],
+        target_pos: Optional[np.ndarray],
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], float, float, float, float, np.ndarray, Optional[float]]:
+        """Resolves active patch with hot-swap ramp-in apply time, confidence scaling, and safety clamps."""
+        active_patch = self.bridge.get_active_patch()
+
+        # Compute hot-swap ramp factor (lambda in [0.0, 1.0])
+        ramp = 1.0
+        if active_patch is not None and self.patch_cfg.ramp_duration_s > 0.0:
+            patch_applied_t = self.bridge.get_patch_applied_time()
+            if patch_applied_t is not None:
+                elapsed = max(0.0, time.time() - patch_applied_t)
+                ramp = min(1.0, elapsed / self.patch_cfg.ramp_duration_s)
+
+        # Scale by patch confidence if enabled
+        if active_patch is not None and self.patch_cfg.confidence_scaling:
+            ramp *= float(np.clip(active_patch.confidence, 0.0, 1.0))
+
+        # Extract feedforward force offset [Fx, Fy, Fz]
+        active_ff = explicit_ff
+        if active_ff is None and active_patch and active_patch.feedforward_force_offset:
+            raw_ff = np.array(active_patch.feedforward_force_offset, dtype=np.float32)
+            active_ff = np.clip(
+                raw_ff * ramp,
+                self.patch_cfg.feedforward_clamp_min,
+                self.patch_cfg.feedforward_clamp_max,
+            )
+
+        # Extract motor trim [s1, s2, s3, s4]
+        active_trim = explicit_trim
+        if active_trim is None and active_patch and active_patch.motor_trim_scale:
+            raw_trim = np.array(active_patch.motor_trim_scale, dtype=np.float32)
+            active_trim = 1.0 + (raw_trim - 1.0) * ramp
+            active_trim = np.clip(
+                active_trim,
+                self.patch_cfg.motor_trim_clamp_min,
+                self.patch_cfg.motor_trim_clamp_max,
+            )
+
+        # Extract gain multipliers
+        pos_kp_mult = 1.0
+        pos_kd_mult = 1.0
+        att_kp_mult = 1.0
+        att_kd_mult = 1.0
+        if active_patch and active_patch.gain_multipliers:
+            pos_kp_mult = 1.0 + (active_patch.gain_multipliers.pos_kp - 1.0) * ramp
+            pos_kd_mult = 1.0 + (active_patch.gain_multipliers.pos_kd - 1.0) * ramp
+            att_kp_mult = 1.0 + (active_patch.gain_multipliers.att_kp - 1.0) * ramp
+            att_kd_mult = 1.0 + (active_patch.gain_multipliers.att_kd - 1.0) * ramp
+
+        pos_kp_mult = float(np.clip(pos_kp_mult, self.patch_cfg.gain_multiplier_clamp_min, self.patch_cfg.gain_multiplier_clamp_max))
+        pos_kd_mult = float(np.clip(pos_kd_mult, self.patch_cfg.gain_multiplier_clamp_min, self.patch_cfg.gain_multiplier_clamp_max))
+        att_kp_mult = float(np.clip(att_kp_mult, self.patch_cfg.gain_multiplier_clamp_min, self.patch_cfg.gain_multiplier_clamp_max))
+        att_kd_mult = float(np.clip(att_kd_mult, self.patch_cfg.gain_multiplier_clamp_min, self.patch_cfg.gain_multiplier_clamp_max))
+
+        # Target setpoint in MuJoCo frame
+        current_target_pos = (target_pos if target_pos is not None else self.target_pos).copy()
+        if active_patch and active_patch.safety_envelope and active_patch.safety_envelope.temp_setpoint_offset:
+            offset = np.array(active_patch.safety_envelope.temp_setpoint_offset, dtype=np.float32) * ramp
+            current_target_pos += offset
+
+        # Max tilt deg clamp
+        max_tilt_deg = None
+        if active_patch and active_patch.safety_envelope and active_patch.safety_envelope.max_tilt_deg:
+            max_tilt_deg = float(np.clip(
+                active_patch.safety_envelope.max_tilt_deg,
+                self.patch_cfg.max_tilt_deg_clamp_min,
+                self.patch_cfg.max_tilt_deg_clamp_max,
+            ))
+
+        return active_ff, active_trim, pos_kp_mult, pos_kd_mult, att_kp_mult, att_kd_mult, current_target_pos, max_tilt_deg
 
     def compute_motor_thrusts(
         self,
@@ -166,35 +246,18 @@ class System1Controller:
     ) -> Tuple[np.ndarray, dict]:
         """Core L1 Adaptive + Geometric controller execution."""
         # ----------------------------------------------------------------------
-        # 1. Check for Active System 2 Patch from Async Bridge
+        # 1. Resolve Active System 2 Patch (with ramp-in apply time, confidence, clamps)
         # ----------------------------------------------------------------------
-        active_patch = self.bridge.get_active_patch()
-
-        # Extract feedforward force offset [Fx, Fy, Fz]
-        active_ff = feedforward_force
-        if active_ff is None and active_patch and active_patch.feedforward_force_offset:
-            active_ff = np.array(active_patch.feedforward_force_offset, dtype=np.float32)
-
-        # Extract motor trim [s1, s2, s3, s4]
-        active_trim = motor_trim
-        if active_trim is None and active_patch and active_patch.motor_trim_scale:
-            active_trim = np.array(active_patch.motor_trim_scale, dtype=np.float32)
-
-        # Extract gain multipliers
-        pos_kp_mult = 1.0
-        pos_kd_mult = 1.0
-        att_kp_mult = 1.0
-        att_kd_mult = 1.0
-        if active_patch and active_patch.gain_multipliers:
-            pos_kp_mult = active_patch.gain_multipliers.pos_kp
-            pos_kd_mult = active_patch.gain_multipliers.pos_kd
-            att_kp_mult = active_patch.gain_multipliers.att_kp
-            att_kd_mult = active_patch.gain_multipliers.att_kd
-
-        # Target setpoint in MuJoCo frame
-        current_target_pos = (target_pos if target_pos is not None else self.target_pos).copy()
-        if active_patch and active_patch.safety_envelope and active_patch.safety_envelope.temp_setpoint_offset:
-            current_target_pos += np.array(active_patch.safety_envelope.temp_setpoint_offset, dtype=np.float32)
+        (
+            active_ff,
+            active_trim,
+            pos_kp_mult,
+            pos_kd_mult,
+            att_kp_mult,
+            att_kd_mult,
+            current_target_pos,
+            _,
+        ) = self._resolve_active_patch(sim_time, feedforward_force, motor_trim, target_pos)
 
         # ----------------------------------------------------------------------
         # 2. Coordinate Transformation (MuJoCo ENU/NWU -> Mini-QuadLib NED)
@@ -384,34 +447,19 @@ class System1Controller:
         x, y, z = pos
         vx, vy, vz = vel
 
-        # Check for Active System 2 Patch from Async Bridge
-        active_patch = self.bridge.get_active_patch()
-
-        # Extract feedforward force offset [Fx, Fy, Fz]
-        active_ff = feedforward_force
-        if active_ff is None and active_patch and active_patch.feedforward_force_offset:
-            active_ff = np.array(active_patch.feedforward_force_offset, dtype=np.float32)
-
-        # Extract motor trim [s1, s2, s3, s4]
-        active_trim = motor_trim
-        if active_trim is None and active_patch and active_patch.motor_trim_scale:
-            active_trim = np.array(active_patch.motor_trim_scale, dtype=np.float32)
-
-        # Extract gain multipliers
-        pos_kp_mult = 1.0
-        pos_kd_mult = 1.0
-        att_kp_mult = 1.0
-        att_kd_mult = 1.0
-        if active_patch and active_patch.gain_multipliers:
-            pos_kp_mult = active_patch.gain_multipliers.pos_kp
-            pos_kd_mult = active_patch.gain_multipliers.pos_kd
-            att_kp_mult = active_patch.gain_multipliers.att_kp
-            att_kd_mult = active_patch.gain_multipliers.att_kd
-
-        # Target setpoint in MuJoCo frame
-        current_target_pos = (target_pos if target_pos is not None else self.target_pos).copy()
-        if active_patch and active_patch.safety_envelope and active_patch.safety_envelope.temp_setpoint_offset:
-            current_target_pos += np.array(active_patch.safety_envelope.temp_setpoint_offset, dtype=np.float32)
+        # ----------------------------------------------------------------------
+        # 1. Resolve Active System 2 Patch (with ramp-in apply time, confidence, clamps)
+        # ----------------------------------------------------------------------
+        (
+            active_ff,
+            active_trim,
+            pos_kp_mult,
+            pos_kd_mult,
+            att_kp_mult,
+            att_kd_mult,
+            current_target_pos,
+            custom_max_tilt_deg,
+        ) = self._resolve_active_patch(sim_time, feedforward_force, motor_trim, target_pos)
 
         # Compute position error relative to setpoint
         err_x = x - current_target_pos[0]
@@ -432,9 +480,7 @@ class System1Controller:
             # +Fy requires positive roll (right acceleration in NWU)
             ff_roll = active_ff[1] / self.drone_cfg.total_hover_weight
 
-        max_tilt = self.pid_cfg.max_tilt_rad
-        if active_patch and active_patch.safety_envelope and active_patch.safety_envelope.max_tilt_deg:
-            max_tilt = np.radians(active_patch.safety_envelope.max_tilt_deg)
+        max_tilt = np.radians(custom_max_tilt_deg) if custom_max_tilt_deg is not None else self.pid_cfg.max_tilt_rad
 
         target_pitch = np.clip(
             -(self.pid_cfg.kp_xy * pos_kp_mult) * err_x - (self.pid_cfg.kd_xy * pos_kd_mult) * vx + ff_pitch,

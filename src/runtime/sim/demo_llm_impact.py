@@ -10,14 +10,14 @@ and quantitatively measures how the LLM patch restores flight stability.
 import os
 import sys
 import time
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 import numpy as np
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from runtime.sim.simulator import DroneSimulator
-from runtime.sim.config import SimConfig, DroneConfig, L1Config
+from runtime.sim.config import SimConfig, DroneConfig, L1Config, System2MasterConfig
 from runtime.sim.bridge import System1System2Bridge
 from runtime.brain.llm import System2Brain, System2Worker
 from runtime.schemas.tier2 import System2Patch
@@ -26,12 +26,14 @@ from runtime.schemas.tier2 import System2Patch
 def evaluate_scenario(
     scenario_name: str = "swinging_payload",
     headless: bool = True,
+    s2_cfg: Optional[System2MasterConfig] = None,
 ) -> Dict[str, Any]:
     """Runs a controlled before-and-after comparison of LLM patch impact.
 
     Args:
         scenario_name: 'swinging_payload', 'motor_failure', or 'wind_gust'
         headless: Run without OpenGL window for automated quantitative metrics.
+        s2_cfg: Optional System2MasterConfig for custom thresholds, LLM params, or patch ramp.
 
     Returns:
         Dictionary containing comparative flight statistics before and after LLM patch.
@@ -41,8 +43,9 @@ def evaluate_scenario(
     print("═" * 74)
 
     # 1. Initialize Simulator and Brain
-    sim = DroneSimulator()
-    brain = System2Brain()
+    effective_s2 = s2_cfg or System2MasterConfig()
+    sim = DroneSimulator(s2_cfg=effective_s2)
+    brain = System2Brain(inference_cfg=effective_s2.inference)
     bridge = sim.bridge
 
     dt = sim.sim_cfg.physics_timestep  # 0.002s (500 Hz)
@@ -197,8 +200,18 @@ def evaluate_scenario(
 
 def main() -> None:
     """Entry point for evaluating multiple failure scenarios."""
-    scenario = sys.argv[1] if len(sys.argv) > 1 else "swinging_payload"
-    evaluate_scenario(scenario_name=scenario)
+    import argparse
+    parser = argparse.ArgumentParser(description="Evaluate System 1 vs System 1 + System 2 impact")
+    parser.add_argument("scenario", nargs="?", default="swinging_payload", help="Failure scenario name")
+    parser.add_argument("--config", type=str, default=None, help="Path to custom JSON System2MasterConfig")
+    args = parser.parse_args()
+
+    s2_cfg = None
+    if args.config:
+        s2_cfg = System2MasterConfig.load_json(args.config)
+        print(f"⚙️ Loaded custom System-2 configuration from: {args.config}")
+
+    evaluate_scenario(scenario_name=args.scenario, s2_cfg=s2_cfg)
 
 
 if __name__ == "__main__":

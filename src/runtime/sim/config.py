@@ -135,17 +135,31 @@ class L1Config:
     # Scaling factor for horizontal velocity estimation error
     vtilde_xy_scale: float = 1.0
 
-    # Fast Trigger limits (detecting when to alert System 2)
+    # Fast Trigger limits (detecting when to alert System 2; see FastTriggerConfig in runtime.config)
     pos_error_threshold: float = 0.30        # meters
     tilt_error_threshold_deg: float = 25.0   # degrees
     gyro_rms_threshold: float = 3.5          # rad/s
     force_disturbance_threshold: float = 3.0 # Newtons
 
 
+# ==============================================================================
+# SYSTEM 2 CONFIGURATION RE-EXPORTS (Centralized in runtime.config)
+# ==============================================================================
+from runtime.config.system2_config import (
+    FastTriggerConfig,
+    TelemetrySummaryConfig,
+    PatchApplicationConfig,
+    System2InferenceConfig,
+    System2WorkerConfig,
+    System2MasterConfig,
+)
+
+
 
 # ==============================================================================
 # CHAOS INJECTION & FAILURE MODE SETTINGS
 # ==============================================================================
+<<<<<<< HEAD
 @dataclass
 class ChaosConfig:
     """Configuration for simulated hardware failures and disturbances."""
@@ -167,6 +181,9 @@ class ChaosConfig:
     # Lateral push applied directly to the drone body
     wind_gust_force_newtons: float = 5.0   # 5.0 N lateral force
     wind_gust_duration_seconds: float = 0.80  # Duration of the gust
+=======
+from runtime.chaos.models import ChaosConfig
+>>>>>>> origin/main
 
 
 # ==============================================================================
@@ -183,3 +200,81 @@ class SimConfig:
     cam_distance: float = 2.2    # Distance in meters from drone
     cam_elevation: float = -18.0 # Pitch angle looking slightly down
     cam_azimuth: float = 45.0    # 45 degree angle for clear perspective
+
+
+# ==============================================================================
+# SYSTEM 1 & SYSTEM 2 CANONICAL NAMING & VISUAL ORIENTATION
+# ==============================================================================
+def get_system_naming(mode: str) -> dict:
+    """Returns canonical System-1 / System-2 taxonomy and descriptive labels for a given controller mode.
+
+    Modes:
+      - 'pid': System-1 (Classical PID Reflex)
+      - 'l1_adaptive': System-1 (L1 Adaptive - QuadLib)
+      - 'pid+system2': System-1 (Classical PID) + System-2 (LLM Meta-Controller)
+      - 'l1_adaptive+system2': System-1 (L1 Adaptive) + System-2 (LLM Meta-Controller)
+    """
+    mode_clean = (mode or "pid").lower().strip()
+    has_s2 = "system2" in mode_clean or "+s2" in mode_clean
+    is_l1 = "l1" in mode_clean
+
+    if is_l1 and has_s2:
+        sys_full = "System-1 (L1 Adaptive) + System-2 (LLM Meta-Controller)"
+        sys_short = "S1: L1 + S2: LLM"
+        sys1_label = "System-1 (L1 Adaptive - QuadLib)"
+        sys2_label = "System-2 (LLM Meta-Controller)"
+    elif is_l1:
+        sys_full = "System-1 (L1 Adaptive - QuadLib)"
+        sys_short = "System-1 (L1 Adaptive)"
+        sys1_label = "System-1 (L1 Adaptive - QuadLib)"
+        sys2_label = "None (Reflex-Only)"
+    elif has_s2:
+        sys_full = "System-1 (Classical PID) + System-2 (LLM Meta-Controller)"
+        sys_short = "S1: PID + S2: LLM"
+        sys1_label = "System-1 (Classical PID)"
+        sys2_label = "System-2 (LLM Meta-Controller)"
+    else:
+        sys_full = "System-1 (Classical PID)"
+        sys_short = "System-1 (PID)"
+        sys1_label = "System-1 (Classical PID)"
+        sys2_label = "None (Baseline)"
+
+    return {
+        "mode_id": mode_clean,
+        "system_name": sys_full,
+        "system_short": sys_short,
+        "system1_type": "L1 Adaptive" if is_l1 else "Classical PID",
+        "system1_label": sys1_label,
+        "system2_enabled": has_s2,
+        "system2_label": sys2_label,
+    }
+
+
+def get_drone_orientation(drone_idx: int) -> dict:
+    """Returns the visual color, spatial screen position, and coordinates for Drone 1 and Drone 2.
+
+    Visual orientation:
+      - Drone 2 (Spawn Y = +1.2m): Visualized on the LEFT of the viewer screen with CYAN accents.
+      - Drone 1 (Spawn Y = -1.2m): Visualized on the RIGHT of the viewer screen with ORANGE accents.
+    """
+    if drone_idx == 2:
+        return {
+            "index": 2,
+            "key": "drone2",
+            "screen_side": "Left",
+            "color_name": "Cyan",
+            "hex_color": "#00D8F6",
+            "spawn_y": +1.2,
+            "display_title": "Drone 2 (Left / Cyan)",
+        }
+    else:
+        return {
+            "index": 1,
+            "key": "drone1",
+            "screen_side": "Right",
+            "color_name": "Orange",
+            "hex_color": "#FF6B35",
+            "spawn_y": -1.2,
+            "display_title": "Drone 1 (Right / Orange)",
+        }
+

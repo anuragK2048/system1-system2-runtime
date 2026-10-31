@@ -7,6 +7,41 @@
 ## Architecture Overview
 
 ```
+[ MuJoCo Physics (500 Hz / 2 ms) ]
+                │
+                ▼
+[ System 1 Controller (500 Hz) ]
+  ├── 1. Geometric Controller (u_b: SE(3) attitude & position tracking)
+  └── 2. L1 Adaptive Observer (u_ad: estimates unmodeled force sigma_f & moment sigma_M)
+                │
+                ▼
+[ 500 Hz Fast Bridge & Ring Buffer ]
+  ├── Evaluates 4 Fast Trigger channels:
+  │     • Pos Error > 0.30m
+  │     • Tilt > 25°
+  │     • Gyro > 3.5 rad/s
+  │     • L1 Disturbance Force > 3.0N  <-- (Provided by L1 observer!)
+  └── If tripped: Bundles last 1.0s sliding window into TelemetrySummary
+                │
+                ▼ (Non-blocking background thread)
+[ System 2 LLM Meta-Controller (0.5 - 2 Hz) ]
+  ├── Diagnoses root cause (e.g., "10N headwind with pitch tilt")
+  └── Returns JSON Control Patch:
+        • feedforward_force_offset: [dFx, dFy, dFz]
+        • motor_trim_scale: [m1, m2, m3, m4]
+        • gain_multipliers: {pos_kp, pos_kd, att_kp, att_kd}
+        • safety_envelope: {max_tilt_deg}
+                │
+                ▼
+[ Injected back into System 1 (500 Hz) ]
+  ├── dF is added directly to target acceleration (pre-tilting against wind)
+  ├── Motor trim scales individual PWM outputs (compensating degraded motors)
+  └── Gains adjust damping to eliminate chatter
+```
+
+
+
+```
                       ┌───────────────────────────────────────────────┐
                       │  System 2 (Async LLM Meta-Controller, 1-5 Hz) │
                       │  - Diagnoses failures and environmental chaos │
@@ -59,6 +94,55 @@
 - **Semantic LLM Summarizer:** Translates raw 500 Hz state data into human- and LLM-readable summaries (Euler angles, gyro RMS/jitter, actuator effort/saturation, and estimated disturbance forces).
 - **Dynamic Control Patches:** System 2 injects real-time adjustments without stopping or delaying the 500 Hz reflex loop.
 
+### 3. Dual-Drone Comparative Architecture & Spatial Orientation
+In the 3D OpenGL MuJoCo window and the Web Dashboard, the two drones are spatially aligned as follows:
+- **🔵 Left Drone (Cyan / Drone 2, $Y = +1.2\text{ m}$)**
+- **🟠 Right Drone (Orange / Drone 1, $Y = -1.2\text{ m}$)**
+
+#### Supported Canonical Operating Systems
+Each drone can run any of the four canonical configurations:
+1. **`System-1 (Classical PID)`**: Baseline PID position and attitude reflex control.
+2. **`System-1 (L1 Adaptive - QuadLib)`**: Fast piecewise-constant L1 adaptive disturbance observer canceling unmodeled force and moment disturbances at 500 Hz.
+3. **`System-1 (Classical PID) + System-2 (LLM Meta-Controller)`**: Baseline PID controller augmented with high-level asynchronous LLM reasoning.
+4. **`System-1 (L1 Adaptive) + System-2 (LLM Meta-Controller)`**: Full dual-tier hybrid architecture combining 500 Hz L1 adaptive reflexes with 1–5 Hz LLM strategic compensation.
+
+---
+
+## Repository Structure
+
+```
+system1-system2-runtime/
+├── assets/skydio_x2/          # Skydio X2 drone MJCF models and dual_scene.xml
+├── frontend/                  # Modern web dashboard for live monitoring & chaos injection
+│   └── index.html             # Glassmorphic UI with real-time SSE telemetry & control sliders
+├── logs/                      # Audit trails for LLM meta-controller reasoning transactions
+│   ├── llm_calls.jsonl        # Machine-readable JSONL execution log
+│   └── llm_calls.log          # Human-readable formatted log
+├── src/runtime/               # Core Python / C codebase
+│   ├── brain/                 # System-2 async LLM reasoning engine & prompt definitions
+│   ├── chaos/                 # Real-time chaos injection (motor cuts, wind, payload, noise)
+│   │   ├── manager.py         # Thread-safe ChaosManager for Drone 1, Drone 2, or Synchronized
+│   │   ├── models.py          # Typed dataclasses for chaos configurations
+│   │   ├── physics.py         # MuJoCo physics application of forces, moments, and noise
+│   │   └── presets.py         # Repeatable multi-select benchmark presets
+│   ├── logging/               # Transaction logging for latency, token count, and control patches
+│   ├── quadlib/               # Compiled C library (`libmini_quadlib`) with ctypes bridge
+│   ├── schemas/               # Pydantic models for telemetry and System-2 patch packets
+│   ├── server/                # FastAPI application exposing REST and SSE streaming endpoints
+│   │   ├── app.py             # Server entrypoint and static mount for dashboard
+│   │   ├── routes_chaos.py    # REST routes for custom sliders, multi-presets, and target selection
+│   │   ├── routes_telemetry.py# Telemetry status and snapshot APIs
+│   │   ├── state.py           # Shared simulation context and bridge state
+│   │   └── stream.py          # High-frequency Server-Sent Events (SSE) telemetry generator
+│   └── sim/                   # 500 Hz MuJoCo simulation environment & controllers
+│       ├── bridge.py          # System 1 <-> System 2 thread-safe coordination bridge
+│       ├── config.py          # Drone parameters, spatial orientations, and system naming
+│       ├── dual_simulator.py  # Synchronized dual-drone simulator with wall-clock pacing & HUD
+│       ├── system1_controller.py # 500 Hz SE(3) Geometric and L1 Adaptive reflex loops
+│       └── view_dual_drone.py # Interactive launcher with 3D window and automatic web server
+└── tests/                     # Comprehensive unit and integration test suite (43+ tests)
+```
+
 ---
 
 ## Quickstart
@@ -68,32 +152,39 @@
 uv run mjpython src/runtime/sim/view_drone.py
 ```
 
-### Run the 3D Dual-Drone Side-by-Side Comparison
+### Run the 3D Dual-Drone Side-by-Side Comparison (With Live Web Control)
 ```bash
 # Recommended default (PID Baseline vs. L1 Adaptive + System 2 LLM):
+# Automatically launches the 3D MuJoCo window AND the Web Dashboard on port 8000!
 uv run mjpython src/runtime/sim/view_dual_drone.py
 
-# Using Quick Presets:
-uv run mjpython src/runtime/sim/view_dual_drone.py --preset 1   # PID vs. L1 Adaptive (Reflex Comparison)
-uv run mjpython src/runtime/sim/view_dual_drone.py --preset 2   # L1 Adaptive vs. L1 Adaptive + System 2 LLM
-uv run mjpython src/runtime/sim/view_dual_drone.py --preset 3   # PID vs. L1 Adaptive + System 2 LLM
-uv run mjpython src/runtime/sim/view_dual_drone.py --preset 4   # PID vs. PID + System 2 LLM
-
-# Fully Custom Comparison:
-uv run mjpython src/runtime/sim/view_dual_drone.py --drone1 pid --drone2 l1_adaptive+system2
-
-# Interactive Selector Menu:
-uv run mjpython src/runtime/sim/view_dual_drone.py --interactive
+# Open Web Dashboard in browser: http://localhost:8000
+# API Documentation: http://localhost:8000/docs
 ```
 
-### Run Controller, Bridge & Dual-Drone Tests
+### Run Standalone Headless Server
+```bash
+# Runs 500 Hz MuJoCo simulation headlessly with Web Dashboard:
+uv run python -m runtime.server.app --headless --port 8000
+```
+
+### Run Controller, Bridge, Chaos & Server Tests
 ```bash
 uv run python -m unittest discover tests
 ```
 
-### Interactive Chaos Hotkeys (Inside 3D Viewer)
-- `[Shift + 1]` (or `6`): Cut Motor 1 power by 60% (Chipped propeller / ESC fault)
-- `[Shift + 2]` (or `7`): Attach swinging pendulum cargo (0.35kg tethered payload)
-- `[Shift + 3]` (or `8`): Inject high-frequency IMU sensor vibration noise
-- `[Shift + 4]` (or `9`): Blow sudden 5.0 N lateral wind gust
-- `[Shift + 5]` (or `0`): Reset drone to level hover
+### Real-Time Chaos Controls (Dual Options: Web Sliders or In-Viewer Hotkeys)
+1. **Web Dashboard (`http://localhost:8000`)**:
+   - Independent sliders for Motors 1–4 ($0\%\text{--}100\%$)
+   - 3D Wind Vector ($0\text{--}15\text{N}$, compass direction, Dryden turbulence)
+   - Tethered Cargo coupling (toggle, mass, aerodynamic wind drag on bob)
+   - IMU sensor chatter noise slider
+   - Target selector (`Synchronize Both`, `🔵 Left (Cyan / D2)`, `🟠 Right (Orange / D1)`)
+   - Repeatable multi-select benchmark presets
+   - Live telemetry, thrust meters, L1 disturbance observer comparison, and LLM reasoning stream
+2. **Interactive Hotkeys (Inside 3D MuJoCo Viewer)**:
+   - `[Shift + 1]` (or `6`): Preset 1 - Cut Motor 1 power by 60% (Chipped propeller flutter)
+   - `[Shift + 2]` (or `7`): Preset 2 - Attach swinging pendulum cargo (0.35kg bob + wind drag)
+   - `[Shift + 3]` (or `8`): Preset 3 - Inject high-frequency IMU sensor vibration noise
+   - `[Shift + 4]` (or `9`): Preset 4 - Blow 6.5 N lateral crosswind + turbulence
+   - `[Shift + 5]` (or `0`): Preset 0 - Reset drones to clean level hover
