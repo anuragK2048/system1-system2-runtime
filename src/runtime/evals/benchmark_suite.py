@@ -45,6 +45,8 @@ class BenchmarkComparison:
     s2_crashed: bool
     s2_calls_mean: float
     winner: str
+    s1_pass_rate: float = 0.0  # fraction of s1_only seeds with verdict "pass"
+    s2_pass_rate: float = 0.0  # fraction of s1_s2 seeds with verdict "pass"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -62,6 +64,8 @@ class BenchmarkComparison:
             "s2_crashed": self.s2_crashed,
             "s2_calls_mean": self.s2_calls_mean,
             "winner": self.winner,
+            "s1_pass_rate": self.s1_pass_rate,
+            "s2_pass_rate": self.s2_pass_rate,
         }
 
 
@@ -114,6 +118,8 @@ class BenchmarkReport:
                     s2_crashed=bool(c["s2_crashed"]),
                     s2_calls_mean=float(c.get("s2_calls_mean", 0.0)),
                     winner=c["winner"],
+                    s1_pass_rate=float(c.get("s1_pass_rate", 0.0)),
+                    s2_pass_rate=float(c.get("s2_pass_rate", 0.0)),
                 )
             )
         return cls(
@@ -229,9 +235,17 @@ class BenchmarkSuite:
                 return avg
             metric_keys = list(results[0].metrics.keys())
             for k in metric_keys:
-                vals = [float(r.metrics.get(k, 0.0)) for r in results]
-                avg[k] = float(np.mean(vals))
+                # Skip None values (e.g. t_detect_s when no trigger fired)
+                # instead of crashing on float(None).
+                vals = [float(v) for v in (r.metrics.get(k) for r in results) if v is not None]
+                avg[k] = float(np.mean(vals)) if vals else 0.0
             return avg
+
+        def _pass_rate(results: List[EvalResult]) -> float:
+            if not results:
+                return 0.0
+            passed = sum(1 for r in results if (r.verdict or {}).get("verdict") == "pass")
+            return float(passed) / float(len(results))
 
         s1_avg = _avg_metrics(s1_results)
         s2_avg = _avg_metrics(s2_results)
@@ -276,6 +290,8 @@ class BenchmarkSuite:
             s2_crashed=s2_crashed,
             s2_calls_mean=round(s2_calls_avg, 1),
             winner=winner,
+            s1_pass_rate=round(_pass_rate(s1_results), 3),
+            s2_pass_rate=round(_pass_rate(s2_results), 3),
         )
 
     def run_full_benchmark(

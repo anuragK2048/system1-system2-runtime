@@ -203,6 +203,46 @@ def _s2_call_count(steps: List[StepRecord]) -> int:
     return sum(1 for s in steps if s.get("s2_called", False))
 
 
+def _time_to_detect(steps: List[StepRecord]) -> Optional[float]:
+    """Sim seconds from fault onset to the first System-2 trigger event.
+
+    Fault-onset source: the harness records ``fault_onset_s`` on every step
+    at the moment the scenario fault is applied (post-warmup). The trigger
+    time comes from the bridge FastTriggerEvent timestamp stamped as
+    ``trigger_t``. Returns None when no trigger fired (e.g. s1_only runs).
+    """
+    if not steps:
+        return None
+    onset = steps[0].get("fault_onset_s")
+    if onset is None:
+        return None
+    for s in steps:
+        tt = s.get("trigger_t")
+        if tt is not None:
+            return float(tt) - float(onset)
+    return None
+
+
+def _time_to_patch(steps: List[StepRecord]) -> Optional[float]:
+    """Sim seconds from fault onset to the first System-2 patch application.
+
+    Fault-onset source: same harness ``fault_onset_s`` anchor as
+    :func:`_time_to_detect`. The patch time is the sim time at which
+    ``bridge.apply_system2_patch`` was called, stamped as
+    ``patch_applied_t``. Returns None when no patch was applied.
+    """
+    if not steps:
+        return None
+    onset = steps[0].get("fault_onset_s")
+    if onset is None:
+        return None
+    for s in steps:
+        pt = s.get("patch_applied_t")
+        if pt is not None:
+            return float(pt) - float(onset)
+    return None
+
+
 def _altitude_sag(steps: List[StepRecord]) -> float:
     """Maximum downward altitude sag below target altitude."""
     if not steps:
@@ -257,6 +297,8 @@ register_metric("crash", "Crashed / Ground Tumble", "", _crash_detector, higher_
 register_metric("control_effort", "Excess Control Effort", "N²", _control_effort, higher_is_better=False, format_spec=".1f")
 register_metric("motor_saturation_pct", "Motor Saturation Rate", "%", _motor_saturation_pct, higher_is_better=False, format_spec=".1f")
 register_metric("s2_calls", "System-2 Reasoning Invocations", "", _s2_call_count, higher_is_better=False, format_spec="d")
+register_metric("t_detect_s", "Time to Detect (fault onset → S2 trigger)", "s", _time_to_detect, higher_is_better=False, format_spec=".2f")
+register_metric("t_patch_s", "Time to Patch (fault onset → S2 patch)", "s", _time_to_patch, higher_is_better=False, format_spec=".2f")
 
 
 # ==============================================================================
