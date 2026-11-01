@@ -68,6 +68,7 @@
     <light name="spotlight1" mode="targetbodycom" target="d1_x2" pos="0 -2.2 2"/>
     <body name="d1_x2" pos="0 -1.2 0.1" childclass="x2">
       <freejoint name="d1_root"/>
+      <camera name="d1_fpv" pos="0.16 0 0.06" xyaxes="0 -1 0 0 0 1" fovy="90"/>
       <site name="d1_imu" pos="0 0 .02"/>
       <geom material="phong3SG" mesh="X2_lowpoly" class="visual" quat="0 0 1 1"/>
       <geom class="collision" size=".06 .027 .02" pos=".04 0 .02"/>
@@ -105,6 +106,7 @@
     <light name="spotlight2" mode="targetbodycom" target="d2_x2" pos="0 2.2 2"/>
     <body name="d2_x2" pos="0 1.2 0.1" childclass="x2">
       <freejoint name="d2_root"/>
+      <camera name="d2_fpv" pos="0.16 0 0.06" xyaxes="0 -1 0 0 0 1" fovy="90"/>
       <site name="d2_imu" pos="0 0 .02"/>
       <geom material="phong3SG" mesh="X2_lowpoly" class="visual" quat="0 0 1 1"/>
       <geom class="collision" size=".06 .027 .02" pos=".04 0 .02"/>

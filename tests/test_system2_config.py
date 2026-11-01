@@ -117,7 +117,7 @@ class TestSystem2Config(unittest.TestCase):
         """Verifies that patch ramp-in apply time smoothly scales control and clamps excessive values."""
         patch_cfg = PatchApplicationConfig(
             ramp_duration_s=0.5,
-            feedforward_clamp_max=8.0,
+            feedforward_clamp_max=4.0,
         )
         bridge = System1System2Bridge(patch_cfg=patch_cfg)
         controller = System1Controller(bridge=bridge, patch_cfg=patch_cfg)
@@ -150,8 +150,8 @@ class TestSystem2Config(unittest.TestCase):
         resolved_ff, _, _, _, _, _, _, _ = controller._resolve_active_patch(
             sim_time=1.0, explicit_ff=None, explicit_trim=None, target_pos=None
         )
-        # Raw force was 15.0N, but clamp is 8.0N
-        self.assertAlmostEqual(resolved_ff[0], 8.0, places=4)
+        # Raw 15.0N -> validate_patch clamps to 6.0N (F2), then patch_cfg clamps to 4.0N
+        self.assertAlmostEqual(resolved_ff[0], 4.0, places=4)
 
     def test_patch_ttl_expiration(self):
         """Verifies that patch auto-expires if patch_ttl_s is reached."""

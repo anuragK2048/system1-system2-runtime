@@ -24,6 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from runtime.server.state import sim_context
 from runtime.server.routes_chaos import router as chaos_router
 from runtime.server.routes_telemetry import router as telemetry_router
+from runtime.server.routes_fpv import router as fpv_router
 from runtime.server.stream import telemetry_websocket_endpoint
 
 
@@ -57,6 +58,7 @@ def create_app() -> FastAPI:
     # Mount REST routers
     app.include_router(chaos_router)
     app.include_router(telemetry_router)
+    app.include_router(fpv_router)
 
     # Mount WebSocket telemetry stream
     app.add_api_websocket_route("/ws/telemetry", telemetry_websocket_endpoint)
