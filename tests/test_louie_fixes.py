@@ -2,7 +2,8 @@
 
 Covers, without needing an LLM backend or the 3D viewer:
 - F2: validate_patch clamps out-of-range values and rejects bad patches.
-- F3: wind gust is a real timed event (latch, expiry, early cancel).
+- F3: wind gust is a real timed event (ported to the runtime.chaos API:
+  half-sine bursts with explicit duration instead of a sustained toggle).
 - Timing item 3: bridge trigger cooldown uses sim time, not wall time.
 - Timing item 4: triggers correlate to fault onset for time-to-trigger.
 """
@@ -118,43 +119,51 @@ class _StubData:
 
 
 class TestTimedWindGust(unittest.TestCase):
-    """F3: wind gust is a real timed event."""
+    """F3: wind gust is a real timed event (runtime.chaos API).
 
-    def test_gust_expires_after_duration(self):
+    The chaos engine was refactored into the runtime.chaos package: gusts are
+    now half-sine bursts with an explicit duration. These tests pin the
+    timed-expiry behavior on the new API.
+    """
+
+    def test_gust_burst_expires_after_duration(self):
         chaos = ChaosManager(cfg=ChaosConfig())
         data = _StubData()
-        chaos.trigger_wind_gust(current_time=1.0)
-        self.assertTrue(chaos.active_chaos["wind_gust"])
+        # Trigger a 0.8 s, 5 N half-sine burst at sim t=1.0 (F3: timed, not a toggle)
+        chaos.trigger_wind_gust(force=5.0, duration_s=0.8, sim_time=1.0)
+        self.assertTrue(chaos.drone1.wind.gust_active)
 
-        chaos.apply_wind_gust(data, 1, 1.0)
-        self.assertAlmostEqual(data.xfrc_applied[1, 0], 5.0)
+        # Mid-burst (t=1.4): half-sine peaks at 5 N along +X
+        chaos.apply_wind_gust(data, 1, 1.4)
+        self.assertAlmostEqual(data.xfrc_applied[1, 0], 5.0, places=5)
 
+        # Past expiry (t=1.9 > 1.0 + 0.8): burst contributes nothing
         data2 = _StubData()
-        chaos.apply_wind_gust(data2, 1, 1.5)  # before 1.0 + 0.8 expiry
-        self.assertAlmostEqual(data2.xfrc_applied[1, 0], 5.0)
-        self.assertTrue(chaos.active_chaos["wind_gust"])
+        chaos.apply_wind_gust(data2, 1, 1.9)
+        self.assertAlmostEqual(data2.xfrc_applied[1, 0], 0.0, places=5)
 
-        data3 = _StubData()
-        chaos.apply_wind_gust(data3, 1, 1.9)  # past expiry
-        self.assertAlmostEqual(data3.xfrc_applied[1, 0], 0.0)
-        self.assertFalse(chaos.active_chaos["wind_gust"])
-
-    def test_gust_latches_on_direct_flag_set(self):
-        # Scripts/demo set the flag directly; end time must still latch.
+    def test_direct_flag_assignment_drives_wind(self):
+        # Scripts/demo set the flag directly; the legacy proxy must translate
+        # it into a real wind force (and back to calm).
         chaos = ChaosManager(cfg=ChaosConfig())
         data = _StubData()
         chaos.active_chaos["wind_gust"] = True
-        chaos.apply_wind_gust(data, 1, 5.0)
-        self.assertAlmostEqual(data.xfrc_applied[1, 0], 5.0)
-        self.assertAlmostEqual(chaos.gust_end_time, 5.8)
-
-    def test_hotkey_cancels_gust_early(self):
-        chaos = ChaosManager(cfg=ChaosConfig())
-        chaos.handle_key(57)  # '9': wind gust on
         self.assertTrue(chaos.active_chaos["wind_gust"])
-        chaos.handle_key(57)  # '9' again: cancel early
+        chaos.apply_wind_gust(data, 1, 5.0)
+        self.assertAlmostEqual(data.xfrc_applied[1, 0], 5.0, places=5)
+
+        chaos.active_chaos["wind_gust"] = False
         self.assertFalse(chaos.active_chaos["wind_gust"])
-        self.assertEqual(chaos.gust_end_time, 0.0)
+        data2 = _StubData()
+        chaos.apply_wind_gust(data2, 1, 6.0)
+        self.assertAlmostEqual(data2.xfrc_applied[1, 0], 0.0, places=5)
+
+    def test_hotkey_toggles_wind(self):
+        chaos = ChaosManager(cfg=ChaosConfig())
+        chaos.handle_key(57)  # '9': sustained wind on
+        self.assertTrue(chaos.active_chaos["wind_gust"])
+        chaos.handle_key(57)  # '9' again: wind off
+        self.assertFalse(chaos.active_chaos["wind_gust"])
 
 
 class TestBridgeTiming(unittest.TestCase):

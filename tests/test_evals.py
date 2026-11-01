@@ -125,18 +125,23 @@ class TestEvalsSuite(unittest.TestCase):
             "trigger.pos_error_threshold": [0.20, 0.30],
             "patch.ramp_duration_s": [0.0, 0.20],
         }
-        with tempfile.NamedTemporaryFile(suffix=".json") as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
             res = suite.run_grid_search(
-                scenario_id="microburst_wind",
-                param_grid=grid,
-                severity=1.0,
-                duration_s=1.0,
-                output_best_json=tmp.name,
-                verbose=False,
-            )
+            scenario_id="microburst_wind",
+            param_grid=grid,
+            severity=1.0,
+            duration_s=1.0,
+            output_best_json=tmp_path,
+            verbose=False,
+        )
             self.assertEqual(res["trials_evaluated"], 4)
             self.assertIsNotNone(res["best_params"])
-            self.assertTrue(Path(tmp.name).exists())
+            self.assertTrue(Path(tmp_path).exists())
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
 
     def test_html_dashboard_generation(self) -> None:
         """Tests that the interactive HTML dashboard is successfully built."""

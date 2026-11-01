@@ -454,6 +454,72 @@
       flex: 1;
     }
 
+    /* FPV Camera Panel (inside Middle Panel) */
+    .fpv-section {
+      margin-top: 14px;
+      background: var(--bg-darker);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .fpv-tabs {
+      display: flex;
+      background: rgba(22, 27, 34, 0.6);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 3px;
+      gap: 3px;
+    }
+
+    .fpv-tab {
+      flex: 1;
+      text-align: center;
+      padding: 5px 4px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: transparent;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .fpv-tab:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .fpv-tab.active {
+      color: #FFFFFF;
+      background: #21262D;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    }
+
+    .fpv-tab.active[data-fpv="drone1"] {
+      color: var(--d1-orange);
+      border-bottom: 2px solid var(--d1-orange);
+    }
+
+    .fpv-tab.active[data-fpv="drone2"] {
+      color: var(--d2-cyan);
+      border-bottom: 2px solid var(--d2-cyan);
+    }
+
+    .fpv-img {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      object-fit: contain;
+      background: #000000;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      display: block;
+    }
+
     .drone-col {
       background: var(--bg-darker);
       border: 1px solid var(--border-color);
@@ -1287,6 +1353,19 @@
           </div>
 
         </div>
+
+        <!-- FPV Camera Feed (MJPEG, body-fixed camera) -->
+        <div class="fpv-section">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span class="section-title" style="margin: 0;">📷 FPV Camera</span>
+            <span style="font-size: 10px; color: var(--text-dim);">640×480 · ~15 FPS</span>
+          </div>
+          <div class="fpv-tabs">
+            <button class="fpv-tab active" data-fpv="drone2" id="fpvTabD2">🔵 Left (Cyan / D2)</button>
+            <button class="fpv-tab" data-fpv="drone1" id="fpvTabD1">🟠 Right (Orange / D1)</button>
+          </div>
+          <img class="fpv-img" id="fpvImg" src="/api/fpv/stream?drone=drone2" alt="FPV camera feed (starts when the simulator is running)">
+        </div>
       </div>
     </section>
 
@@ -1880,6 +1959,16 @@
     }
 
     // Target Tabs
+    // FPV Camera drone switch (swaps the MJPEG <img> source; no WebSocket)
+    document.querySelectorAll(".fpv-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".fpv-tab").forEach(t => t.classList.remove("active"));
+        tab.classList.add("active");
+        const fpvImg = document.getElementById("fpvImg");
+        fpvImg.src = `/api/fpv/stream?drone=${tab.dataset.fpv}&t=${Date.now()}`;
+      });
+    });
+
     document.querySelectorAll(".target-tab").forEach(tab => {
       tab.addEventListener("click", () => {
         document.querySelectorAll(".target-tab").forEach(t => t.classList.remove("active"));

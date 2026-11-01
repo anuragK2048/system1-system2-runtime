@@ -305,10 +305,12 @@ class System1Controller:
         # Uses the patch envelope when present, else the 25 deg default above.
         # (Velocity-error terms can add transient tilt beyond this bound.)
         # ----------------------------------------------------------------------
+        
         max_tilt_deg = L1_DEFAULT_MAX_TILT_DEG
-        if (active_patch is not None and active_patch.safety_envelope is not None
-                and active_patch.safety_envelope.max_tilt_deg is not None):
-            max_tilt_deg = float(active_patch.safety_envelope.max_tilt_deg)
+        _f7_patch = self.bridge.get_active_patch()
+        if (_f7_patch is not None and _f7_patch.safety_envelope is not None and _f7_patch.safety_envelope.max_tilt_deg is not None):
+            max_tilt_deg = float(_f7_patch.safety_envelope.max_tilt_deg)
+
         kp_xy = float(min(effective_pos_gains[0], effective_pos_gains[1]))
         if kp_xy > 1e-6 and max_tilt_deg > 0.0:
             max_err_xy = 9.81 * float(np.tan(np.radians(max_tilt_deg))) / kp_xy
