@@ -12,6 +12,7 @@ world simultaneously for real-time, side-by-side visual and quantitative compari
 """
 
 import time
+import threading
 from pathlib import Path
 from typing import Optional, Dict, Tuple, Any
 import numpy as np
@@ -235,49 +236,61 @@ class DualDroneSimulator:
             for i in range(1, 5)
         ]
 
+        # (for macOS & Windows cross-platform thread safety: coordinates physics steps,
+        # resets, and offscreen camera snapshots so concurrent threads don't corrupt MjData on either OS)
+        self.physics_lock = threading.Lock()
+
         # Initialize physics state
         self.reset_simulation()
 
     def reset_simulation(self) -> None:
         """Resets both drones to their initial level hover positions."""
-        mujoco.mj_resetDataKeyframe(self.model, self.data, 0)
+        # (for macOS & Windows cross-platform thread safety: ensure reset executes atomically)
+        with self.physics_lock:
+            mujoco.mj_resetDataKeyframe(self.model, self.data, 0)
 
-        # Drone 1 coordinates
-        self.data.qpos[self.d1_qpos_adr : self.d1_qpos_adr + 3] = self.d1_spawn
-        self.data.qpos[self.d1_qpos_adr + 3 : self.d1_qpos_adr + 7] = [1.0, 0.0, 0.0, 0.0]
-        self.data.qpos[self.d1_payload_qpos_adr : self.d1_payload_qpos_adr + 2] = 0.0
+            # Drone 1 coordinates
+            self.data.qpos[self.d1_qpos_adr : self.d1_qpos_adr + 3] = self.d1_spawn
+            self.data.qpos[self.d1_qpos_adr + 3 : self.d1_qpos_adr + 7] = [1.0, 0.0, 0.0, 0.0]
+            self.data.qpos[self.d1_payload_qpos_adr : self.d1_payload_qpos_adr + 2] = 0.0
 
-        # Drone 2 coordinates
-        self.data.qpos[self.d2_qpos_adr : self.d2_qpos_adr + 3] = self.d2_spawn
-        self.data.qpos[self.d2_qpos_adr + 3 : self.d2_qpos_adr + 7] = [1.0, 0.0, 0.0, 0.0]
-        self.data.qpos[self.d2_payload_qpos_adr : self.d2_payload_qpos_adr + 2] = 0.0
+            # Drone 2 coordinates
+            self.data.qpos[self.d2_qpos_adr : self.d2_qpos_adr + 3] = self.d2_spawn
+            self.data.qpos[self.d2_qpos_adr + 3 : self.d2_qpos_adr + 7] = [1.0, 0.0, 0.0, 0.0]
+            self.data.qpos[self.d2_payload_qpos_adr : self.d2_payload_qpos_adr + 2] = 0.0
 
-        # Zero velocities and forces
-        self.data.qvel[:] = 0.0
-        self.data.qfrc_applied[:] = 0.0
-        self.data.xfrc_applied[:] = 0.0
+            # Zero velocities and forces
+            self.data.qvel[:] = 0.0
+            self.data.qfrc_applied[:] = 0.0
+            self.data.xfrc_applied[:] = 0.0
 
-        # Reset controllers & bridges
-        self.controller_1.reset_l1_state()
-        self.controller_2.reset_l1_state()
-        self.bridge_1.reset()
-        self.bridge_2.reset()
-        if self.worker_1:
-            self.worker_1.worker_state = "IDLE"
-        if self.worker_2:
-            self.worker_2.worker_state = "IDLE"
+            # Reset controllers & bridges
+            self.controller_1.reset_l1_state()
+            self.controller_2.reset_l1_state()
+            self.bridge_1.reset()
+            self.bridge_2.reset()
+            if self.worker_1:
+                self.worker_1.worker_state = "IDLE"
+            if self.worker_2:
+                self.worker_2.worker_state = "IDLE"
 
-        # Clear the kicked-payloads set so payloads receive their initial swing kick
-        # again after reset (previously this was only cleared by ChaosManager.clear_all,
-        # causing payloads to start with zero angle/velocity after a mid-run reset).
-        self.chaos._kicked_payloads.clear()
+            # Clear the kicked-payloads set so payloads receive their initial swing kick
+            # again after reset (previously this was only cleared by ChaosManager.clear_all,
+            # causing payloads to start with zero angle/velocity after a mid-run reset).
+            self.chaos._kicked_payloads.clear()
 
     def step_simulation(self, current_time: float) -> Tuple[dict, dict]:
-        """Executes a single 500 Hz simulation step for both drones.
+        """Executes a single 500 Hz simulation step for both drones under physics lock.
 
         Returns:
             Tuple of (telemetry_drone1, telemetry_drone2).
         """
+        # (for macOS & Windows cross-platform thread safety: acquire lock to prevent mid-step state reads)
+        with self.physics_lock:
+            return self._step_simulation_locked(current_time)
+
+    def _step_simulation_locked(self, current_time: float) -> Tuple[dict, dict]:
+        """Internal physics step implementation."""
         # 0. Record fault on/off transitions for trigger timing correlation
         self.bridge_1.note_fault_state(self.chaos.active_chaos, float(self.data.time))
         self.bridge_2.note_fault_state(self.chaos.active_chaos, float(self.data.time))

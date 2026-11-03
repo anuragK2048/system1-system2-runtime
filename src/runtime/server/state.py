@@ -59,6 +59,10 @@ class SimulationContext:
             self._headless_running: bool = False
             self._headless_thread: Optional[threading.Thread] = None
 
+            # Global server shutdown coordination event (for macOS & Windows cross-platform compatibility:
+            # allows immediate exit on Ctrl+C without waiting for long-lived streaming connections)
+            self.shutdown_event: threading.Event = threading.Event()
+
             self._initialized = True
 
     # ==========================================================================
@@ -112,6 +116,8 @@ class SimulationContext:
                     print(f"⚠️ [SERVER] Worker 2 start failed: {e}")
 
             self._headless_running = True
+            # (for macOS & Windows cross-platform compatibility: reset shutdown event on startup)
+            self.shutdown_event.clear()
             self._headless_thread = threading.Thread(
                 target=self._headless_loop,
                 name="HeadlessSimLoop",
@@ -124,6 +130,8 @@ class SimulationContext:
         """Stops the headless simulation loop."""
         with self._lock:
             self._headless_running = False
+            # (for macOS & Windows cross-platform compatibility: signal streaming workers to terminate)
+            self.shutdown_event.set()
             if self._headless_thread:
                 self._headless_thread.join(timeout=1.0)
                 self._headless_thread = None

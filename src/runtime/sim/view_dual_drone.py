@@ -6,7 +6,11 @@ subjected to identical chaos in real-time MuJoCo physics.
 Usage:
 ------
 # Recommended Default (PID Baseline vs. L1 Adaptive + System 2 LLM):
+# On macOS (uses mjpython for Cocoa GLFW event loop):
 uv run mjpython src/runtime/sim/view_dual_drone.py
+
+# On Windows:
+uv run python src/runtime/sim/view_dual_drone.py
 
 # Using Quick Presets:
 uv run mjpython src/runtime/sim/view_dual_drone.py --preset 1   # PID vs L1 Adaptive (No LLM)
@@ -198,14 +202,25 @@ def main() -> None:
     )
 
     # Launch background FastAPI & WebSocket control server if requested
+    server_holder = {}
     if args.serve:
         import threading
         import uvicorn
         from runtime.server.app import app
+        from runtime.server.state import sim_context
 
         def _run_server():
-            config = uvicorn.Config(app=app, host="0.0.0.0", port=args.port, log_level="warning")
+            # (for macOS & Windows cross-platform compatibility: timeout_graceful_shutdown=0.5
+            # ensures background Uvicorn does not hang waiting for active HTTP streaming connections)
+            config = uvicorn.Config(
+                app=app,
+                host="0.0.0.0",
+                port=args.port,
+                log_level="warning",
+                timeout_graceful_shutdown=0.5,
+            )
             server = uvicorn.Server(config)
+            server_holder["server"] = server
             server.run()
 
         server_thread = threading.Thread(target=_run_server, name="WebServerThread", daemon=True)
@@ -214,7 +229,36 @@ def main() -> None:
         print(f"   • API Documentation: http://localhost:{args.port}/docs")
         print(f"   • Telemetry Stream:  ws://localhost:{args.port}/ws/telemetry\n")
 
-    sim.run()
+    def _shutdown():
+        # (for macOS & Windows cross-platform compatibility: coordinate clean server shutdown across threads)
+        from runtime.server.state import sim_context
+        sim_context.shutdown_event.set()
+        if "server" in server_holder:
+            server_holder["server"].should_exit = True
+        try:
+            from runtime.server.routes_fpv import cleanup_renderer
+            cleanup_renderer()
+        except Exception:
+            pass
+
+    # (for macOS & Windows cross-platform compatibility: install SIGINT signal handler if supported by platform)
+    try:
+        import signal
+        def _sigint_handler(sig, frame):
+            _shutdown()
+            sys.exit(0)
+
+        if hasattr(signal, "SIGINT"):
+            signal.signal(signal.SIGINT, _sigint_handler)
+    except Exception:
+        pass
+
+    try:
+        sim.run()
+    except KeyboardInterrupt:
+        print("\n🛑 [SHUTDOWN] KeyboardInterrupt received. Exiting...")
+    finally:
+        _shutdown()
 
 
 if __name__ == "__main__":

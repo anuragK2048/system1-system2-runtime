@@ -32,9 +32,18 @@ from runtime.server.stream import telemetry_websocket_endpoint
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """FastAPI application lifespan manager for clean startup and shutdown."""
     print("🚁 [SERVER] System 1 / System 2 Runtime API server starting...")
+    # (for macOS & Windows cross-platform compatibility: reset shutdown event on startup)
+    sim_context.shutdown_event.clear()
     yield
     print("🛑 [SERVER] Shutting down simulation server...")
+    # (for macOS & Windows cross-platform compatibility: notify background loops to stop)
+    sim_context.shutdown_event.set()
     sim_context.stop_headless()
+    try:
+        from runtime.server.routes_fpv import cleanup_renderer
+        cleanup_renderer()
+    except Exception:
+        pass
 
 
 def create_app() -> FastAPI:
@@ -107,7 +116,29 @@ def main() -> None:
     if args.headless:
         sim_context.start_headless(drone1_mode=args.drone1, drone2_mode=args.drone2)
 
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    # (for macOS & Windows cross-platform compatibility: configure uvicorn with short graceful shutdown
+    # timeout so Ctrl+C terminates immediately without waiting 30 seconds for streaming connections)
+    config = uvicorn.Config(
+        app,
+        host=args.host,
+        port=args.port,
+        log_level="info",
+        timeout_graceful_shutdown=0.5,
+    )
+    server = uvicorn.Server(config)
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        # (for macOS & Windows cross-platform compatibility: guarantee resources are freed on process exit)
+        sim_context.shutdown_event.set()
+        sim_context.stop_headless()
+        try:
+            from runtime.server.routes_fpv import cleanup_renderer
+            cleanup_renderer()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

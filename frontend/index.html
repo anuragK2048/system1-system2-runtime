@@ -1960,14 +1960,27 @@
 
     // Target Tabs
     // FPV Camera drone switch (swaps the MJPEG <img> source; no WebSocket)
+    const fpvImg = document.getElementById("fpvImg");
     document.querySelectorAll(".fpv-tab").forEach(tab => {
       tab.addEventListener("click", () => {
         document.querySelectorAll(".fpv-tab").forEach(t => t.classList.remove("active"));
         tab.classList.add("active");
-        const fpvImg = document.getElementById("fpvImg");
-        fpvImg.src = `/api/fpv/stream?drone=${tab.dataset.fpv}&t=${Date.now()}`;
+        if (fpvImg) {
+          fpvImg.src = `/api/fpv/stream?drone=${tab.dataset.fpv}&t=${Date.now()}`;
+        }
       });
     });
+
+    // (for macOS & Windows cross-platform browser compatibility: auto-reconnect FPV stream if disconnected or server restarts)
+    if (fpvImg) {
+      fpvImg.onerror = () => {
+        setTimeout(() => {
+          const activeTab = document.querySelector(".fpv-tab.active");
+          const currentDrone = activeTab ? activeTab.dataset.fpv : "drone2";
+          fpvImg.src = `/api/fpv/stream?drone=${currentDrone}&t=${Date.now()}`;
+        }, 1000);
+      };
+    }
 
     document.querySelectorAll(".target-tab").forEach(tab => {
       tab.addEventListener("click", () => {
@@ -2076,6 +2089,13 @@
         chkPayload.checked = false;
         sliderGyroNoise.value = 0;
         valGyroNoise.textContent = "0.00 rad/s";
+
+        // (for cross-platform browser compatibility: re-trigger FPV stream connection after drone reset)
+        const activeTab = document.querySelector(".fpv-tab.active");
+        const currentDrone = activeTab ? activeTab.dataset.fpv : "drone2";
+        if (fpvImg) {
+          fpvImg.src = `/api/fpv/stream?drone=${currentDrone}&t=${Date.now()}`;
+        }
       });
     });
 

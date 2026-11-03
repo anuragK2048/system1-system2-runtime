@@ -39,7 +39,8 @@ class TelemetryStreamManager:
     async def _broadcast_loop(self) -> None:
         """Continuous async loop broadcasting latest simulation telemetry to clients."""
         interval = 1.0 / self.broadcast_fps
-        while len(self.active_connections) > 0:
+        # (for macOS & Windows cross-platform compatibility: stop broadcast loop immediately on server shutdown)
+        while len(self.active_connections) > 0 and not sim_context.shutdown_event.is_set():
             t0 = time.time()
             if sim_context.latest_frame:
                 frame_data = sim_context.latest_frame
