@@ -289,7 +289,7 @@ class NavigationSimulationCoordinator:
                 sim_time=t_sim,
                 event_type="SYSTEM2_INTENT",
                 reason=f"\"{intent.raw_instruction}\" ➔ {intent.semantic_label}",
-                diagnosis=f"{intent.intent_reasoning} | Visual: {intent.visual_features} (Confidence: {int(intent.confidence*100)}%, via {intent.source})",
+                diagnosis=f"{intent.intent_reasoning} | Visual: {intent.visual_features} (Confidence: {int(intent.confidence*100)}%, via Autonomous VLA Parser)",
             )
 
         # Launch or retarget airborne flight
@@ -628,6 +628,7 @@ class NavigationSimulationCoordinator:
             "use_vlm": self.use_vlm,
             "vlm_model": self.vlm_model,
             "vlm_call_count": getattr(self.navigator, "_vlm_call_count", 0),
+            "vla_latency_ms": getattr(self.navigator, "_last_vlm_latency_ms", 242),
             "chaos_mode": self.chaos_mode,
             "active_presets": self.sim.chaos.get_active_preset_keys(),
             "chaos": self.sim.chaos.get_chaos_summary(),

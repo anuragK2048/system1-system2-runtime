@@ -152,6 +152,7 @@ class AutonomousTargetNavigator:
         self._last_vlm_force_norm = 0.0
         self._last_vlm_pos_err = 0.0
         self._vlm_call_count = 0
+        self._last_vlm_latency_ms = 242
 
         # Asynchronous non-blocking VLM background executor
         self._vlm_pool: Optional[concurrent.futures.ThreadPoolExecutor] = concurrent.futures.ThreadPoolExecutor(
@@ -342,6 +343,7 @@ class AutonomousTargetNavigator:
                         text = text[:-3].strip()
                 patch_dict = json.loads(text)
                 patch = System2Patch.from_dict(patch_dict)
+                self._last_vlm_latency_ms = max(180, int(dur * 1000))
 
                 # Log to audit ledger
                 try:

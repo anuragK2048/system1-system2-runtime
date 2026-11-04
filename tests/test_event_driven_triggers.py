@@ -75,13 +75,14 @@ class TestEventDrivenTriggersAndGuidance(unittest.TestCase):
         self.assertIn("motor_trim", snap)
         self.assertIn("max_tilt_clamp", snap)
         self.assertIn("phase", snap)
+        self.assertIn("vla_latency_ms", snap)
 
         # Confirm Meta Llama 3.2 Vision branding
         self.assertIn("Llama-3.2", snap["vlm_model"])
         self.assertIn("Modal", snap["vlm_model"])
 
     def test_dashboard_html_contains_no_removed_scorecard_or_world_pos(self):
-        """Verifies frontend HTML completely removed the Scorecard and 3D World Pos card."""
+        """Verifies frontend HTML completely removed the Scorecard, 3D World Pos, chaos buttons, and toggles."""
         from pathlib import Path
         html_path = Path(__file__).resolve().parents[1] / "frontend" / "navigation_dashboard.html"
         content = html_path.read_text(encoding="utf-8")
@@ -91,6 +92,13 @@ class TestEventDrivenTriggersAndGuidance(unittest.TestCase):
         self.assertNotIn("evals-scorecard-body", content)
         self.assertNotIn("3D Position (World)", content)
         self.assertNotIn("val-pos-xyz", content)
+        self.assertNotIn("chk-live-vlm", content)
+        self.assertNotIn("CHAOS INJECTION", content)
+        self.assertNotIn("btn-chaos-wind", content)
+        self.assertNotIn("Feedforward Force", content)
+        self.assertNotIn("GROQ INTENT PARSER", content)
+        self.assertIn("VLA Response Latency", content)
+        self.assertIn("Visual Navigation Target", content)
         self.assertIn("META LLAMA 3.2 VISION ON MODAL GPU", content)
         self.assertIn("grid-template-columns: repeat(3, 1fr)", content)
 
