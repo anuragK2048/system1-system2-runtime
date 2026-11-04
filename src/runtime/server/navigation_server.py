@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 
 from runtime.server.navigation_state import nav_coordinator
 from runtime.chaos.presets import CHAOS_PRESETS
+from runtime.brain.intent_parser import intent_parser
 
 
 # Paths
@@ -50,6 +51,12 @@ class MissionLaunchRequest(BaseModel):
     chaos: Optional[str] = Field(None, description="Physical disturbance: wind | motor | None")
     duration: Optional[float] = Field(None, description="Max mission duration in seconds")
     reset: bool = Field(False, description="Force reset to origin pad (False allows seamless in-flight retargeting)")
+
+
+class InstructionRequest(BaseModel):
+    instruction: str = Field(..., description="Natural language flight instruction")
+    use_llm: bool = Field(True, description="Enable LLM intent parsing")
+    model: Optional[str] = Field(None, description="Optional LLM model override")
 
 
 class ChaosRequest(BaseModel):
@@ -258,6 +265,17 @@ def create_navigation_app() -> FastAPI:
                         c_active = bool(cmd.get("active", True))
                         res = nav_coordinator.set_chaos(c_type, c_active)
                         await websocket.send_text(json.dumps({"type": "command_ack", "data": res}))
+                    elif action == "instruction":
+                        inst_text = cmd.get("instruction", "")
+                        use_llm = bool(cmd.get("use_llm", True))
+                        model_override = cmd.get("model")
+                        intent = await intent_parser.parse_instruction_async(
+                            instruction=inst_text,
+                            use_llm=use_llm,
+                            model_override=model_override,
+                        )
+                        res = nav_coordinator.execute_instruction(intent)
+                        await websocket.send_text(json.dumps({"type": "instruction_ack", "data": res}))
                 except Exception as parse_err:
                     await websocket.send_text(json.dumps({"type": "error", "message": str(parse_err)}))
         except WebSocketDisconnect:
@@ -292,6 +310,16 @@ def create_navigation_app() -> FastAPI:
             duration=req.duration,
             reset=False,
         )
+
+    @app.post("/api/navigation/instruction")
+    async def natural_language_instruction_endpoint(req: InstructionRequest):
+        """Parses a natural language instruction using System 2 LLM and retargets airborne flight."""
+        intent = await intent_parser.parse_instruction_async(
+            instruction=req.instruction,
+            use_llm=req.use_llm,
+            model_override=req.model,
+        )
+        return nav_coordinator.execute_instruction(intent)
 
     @app.post("/api/navigation/stop")
     def stop_mission_endpoint():

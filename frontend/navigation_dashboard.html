@@ -547,118 +547,6 @@
     input:checked + .slider { background-color: var(--cyan-bright); }
     input:checked + .slider:before { transform: translateX(16px); }
 
-    /* Chaos Disturbance Injector Styles */
-    .chaos-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-      gap: 10px;
-    }
-
-    .chaos-card {
-      background: var(--bg-darker);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 10px;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      position: relative;
-    }
-
-    .chaos-card:hover {
-      border-color: var(--amber-bright);
-      background: var(--bg-card-hover);
-      transform: translateY(-1px);
-    }
-
-    .chaos-card.active {
-      border-color: var(--amber-bright);
-      background: rgba(255, 184, 0, 0.08);
-      box-shadow: 0 0 12px var(--amber-glow);
-    }
-
-    .chaos-card[id="chaos-card-0"].active {
-      border-color: var(--mint-bright);
-      background: rgba(0, 255, 157, 0.08);
-      box-shadow: 0 0 12px var(--mint-glow);
-    }
-
-    .chaos-card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .chaos-name {
-      font-weight: 600;
-      font-size: 11px;
-      color: #FFFFFF;
-    }
-
-    .chaos-badge {
-      font-family: var(--font-mono);
-      font-size: 9px;
-      font-weight: 700;
-      padding: 1px 5px;
-      border-radius: 4px;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid var(--border-color);
-      color: var(--text-muted);
-    }
-
-    .chaos-card.active .chaos-badge {
-      background: rgba(255, 184, 0, 0.15);
-      border-color: rgba(255, 184, 0, 0.4);
-      color: var(--amber-bright);
-    }
-
-    .chaos-desc {
-      font-size: 9.5px;
-      color: var(--text-muted);
-      line-height: 1.3;
-    }
-
-    .chaos-ribbon {
-      margin-block-start: 10px;
-      padding: 8px 12px;
-      background: rgba(0, 0, 0, 0.35);
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .chaos-stat {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    .chaos-stat .k {
-      font-size: 8.5px;
-      font-family: var(--font-mono);
-      color: var(--text-dim);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .chaos-stat .v {
-      font-size: 11px;
-      font-family: var(--font-mono);
-      font-weight: 600;
-      color: var(--text-main);
-    }
-
-    .chaos-stat .v.cyan { color: var(--cyan-bright); }
-    .chaos-stat .v.mint { color: var(--mint-bright); }
-    .chaos-stat .v.amber { color: var(--amber-bright); }
-    .chaos-stat .v.crimson { color: var(--crimson-bright); }
-
     /* Performance Gauges Grid */
     .gauges-grid {
       display: grid;
@@ -831,6 +719,26 @@
     .event-desc {
       color: var(--text-main);
       font-size: 11px;
+    }
+
+    /* Natural Language Instruction Bar & Quick Chips */
+    .chip-btn {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      border-radius: 14px;
+      padding: 3px 10px;
+      font-size: 11px;
+      font-family: var(--font-sans);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .chip-btn:hover {
+      background: rgba(181, 108, 255, 0.15);
+      border-color: var(--purple-bright);
+      color: #FFFFFF;
+      box-shadow: 0 0 8px var(--purple-glow);
     }
 
     /* Automated Test Evals Scorecard Table */
@@ -1044,68 +952,110 @@
         </div>
 
         <div class="panel-body">
+          <!-- System 2 Natural Language Instruction Bar -->
+          <div class="nl-instruction-container" style="background: rgba(181, 108, 255, 0.05); border: 1px solid rgba(181, 108, 255, 0.3); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="color: var(--purple-bright); font-size: 15px;">🧠</span>
+                <span style="font-weight: 700; font-size: 12px; letter-spacing: 0.5px; color: #FFFFFF;">SYSTEM 2 NATURAL LANGUAGE FLIGHT INSTRUCTIONS</span>
+                <span class="badge-pill" style="border-color: rgba(181, 108, 255, 0.4); color: var(--purple-bright); background: rgba(181, 108, 255, 0.1);">VLA META-CONTROLLER</span>
+              </div>
+              <span style="font-size: 10px; color: var(--text-dim); font-family: var(--font-mono);">LLM INTENT PARSER (GROQ / GEMINI)</span>
+            </div>
+
+            <!-- Input & Execute row -->
+            <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+              <input type="text" id="nl-instruction-input" placeholder="Type flight instruction... e.g. 'Find two poles and hover between them', 'Find the window and go through the window', 'Go to the orange pad'..." style="flex: 1; background: #080C12; border: 1px solid #222C3A; border-radius: 6px; padding: 10px 14px; color: #FFFFFF; font-size: 13px; font-family: var(--font-sans); outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--purple-bright)'" onblur="this.style.borderColor='#222C3A'" onkeydown="if(event.key==='Enter') executeNLInstruction()" />
+              <button class="btn" id="btn-execute-nl" onclick="executeNLInstruction()" style="background: var(--purple-bright); color: #06080C; font-weight: 700; padding: 10px 18px; box-shadow: 0 0 12px var(--purple-glow);">
+                <span>⚡</span> PARSE &amp; EXECUTE
+              </button>
+            </div>
+
+            <!-- Quick Semantic Chips -->
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+              <span style="font-size: 10px; color: var(--text-dim); font-family: var(--font-mono); text-transform: uppercase;">QUICK INTENTS:</span>
+              <button class="chip-btn" onclick="setInstructionPrompt('Find two poles and hover between them')">⛩️ "Find two poles and hover between them"</button>
+              <button class="chip-btn" onclick="setInstructionPrompt('Go to the orange pad')">🎯 "Go to the orange pad"</button>
+              <button class="chip-btn" onclick="setInstructionPrompt('Go to the elevated yellow pad')">🛡️ "Go to the elevated yellow pad"</button>
+              <button class="chip-btn" onclick="setInstructionPrompt('Find the window and go through the window')">🪟 "Find the window and go through the window"</button>
+              <button class="chip-btn" onclick="setInstructionPrompt('locate the arch and go through it')">⛩️ "locate the arch and go through it"</button>
+              <button class="chip-btn" onclick="setInstructionPrompt('Return to launch position')">🏠 "Return to launch position"</button>
+              <button class="chip-btn" onclick="setInstructionPrompt('Inspect all arena landmarks in sequence')">🚀 "Inspect all arena landmarks in sequence"</button>
+            </div>
+
+            <!-- Live LLM Intent Feedback Card -->
+            <div id="nl-intent-feedback" style="display: none; margin-top: 10px; padding: 10px 12px; background: rgba(181, 108, 255, 0.08); border: 1px solid rgba(181, 108, 255, 0.3); border-radius: 6px; font-size: 11px;">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                <span id="nl-intent-target" style="font-weight: 700; color: var(--cyan-bright); font-family: var(--font-mono);"></span>
+                <span id="nl-intent-conf" style="color: var(--mint-bright); font-family: var(--font-mono); font-size: 10px;"></span>
+              </div>
+              <div id="nl-intent-visual" style="color: var(--text-muted); margin-bottom: 2px;"></div>
+              <div id="nl-intent-reason" style="color: #FFFFFF; font-style: italic;"></div>
+            </div>
+          </div>
+
           <div class="mission-grid">
             <div class="mission-card active" data-target="alpha" onclick="selectMission('alpha')">
               <div class="mission-header">
-                <span class="mission-name">PAD ALPHA</span>
+                <span class="mission-name">ORANGE LANDING PAD</span>
                 <span class="mission-icon">🎯</span>
               </div>
-              <div class="mission-desc">Runway corridor alignment past pylons to concentric hover pad.</div>
-              <div class="mission-target-coords">X=5.50m, Y=0.0m, Z=1.0m</div>
+              <div class="mission-desc">Concentric amber &amp; white circular hover rings on arena floor plane.</div>
+              <div class="mission-target-coords" style="color: var(--amber-bright);">Visual Target: Amber Concentric Bullseye</div>
             </div>
 
             <div class="mission-card" data-target="runway_poles" onclick="selectMission('runway_poles')">
               <div class="mission-header">
-                <span class="mission-name">RUNWAY POLES</span>
+                <span class="mission-name">TWO CORRIDOR PYLONS</span>
                 <span class="mission-icon">⛩️</span>
               </div>
-              <div class="mission-desc">Precision centered hover between entrance pylons at Y=±0.9m.</div>
-              <div class="mission-target-coords">X=3.50m, Y=0.0m, Z=1.0m</div>
+              <div class="mission-desc">Precision centered hover between dual red/amber entrance gate posts.</div>
+              <div class="mission-target-coords" style="color: var(--crimson-bright);">Visual Target: Twin Entrance Hazard Pylons</div>
             </div>
 
             <div class="mission-card" data-target="delta" onclick="selectMission('delta')">
               <div class="mission-header">
-                <span class="mission-name">PLATFORM DELTA</span>
+                <span class="mission-name">ELEVATED YELLOW PLATFORM</span>
                 <span class="mission-icon">🛡️</span>
               </div>
-              <div class="mission-desc">Overfly Alpha to elevated caution disc platform at Z=1.10m.</div>
-              <div class="mission-target-coords">X=8.00m, Y=0.0m, Z=1.10m</div>
+              <div class="mission-desc">Climb to clear caution rim and establish precision hover on pedestal.</div>
+              <div class="mission-target-coords" style="color: #FFDD00;">Visual Target: Raised Yellow Disc Pedestal</div>
             </div>
 
             <div class="mission-card" data-target="window" onclick="selectMission('window')">
               <div class="mission-header">
-                <span class="mission-name">LEFT WINDOW</span>
+                <span class="mission-name">WALL WINDOW APERTURE</span>
                 <span class="mission-icon">🪟</span>
               </div>
               <div class="mission-desc">+90° active yaw saccade, approach glidepath, and aperture ingress.</div>
-              <div class="mission-target-coords">X=0.0m, Y=+5.0m, Z=1.10m</div>
+              <div class="mission-target-coords" style="color: var(--cyan-bright);">Visual Target: Rectangular Wall Aperture</div>
             </div>
 
             <div class="mission-card" data-target="arch" onclick="selectMission('arch')">
               <div class="mission-header">
-                <span class="mission-name">RIGHT ARCH</span>
+                <span class="mission-name">ARCHED DOORWAY GATE</span>
                 <span class="mission-icon">⛩️</span>
               </div>
-              <div class="mission-desc">-90° active yaw saccade, approach glidepath, and arch passage.</div>
-              <div class="mission-target-coords">X=0.0m, Y=-5.0m, Z=0.90m</div>
+              <div class="mission-desc">-90° active yaw saccade, approach glidepath, and archway passage.</div>
+              <div class="mission-target-coords" style="color: #FF8833;">Visual Target: High-Clearance Curved Arch</div>
             </div>
 
             <div class="mission-card" data-target="home" onclick="selectMission('home')">
               <div class="mission-header">
-                <span class="mission-name">ORIGIN PAD</span>
+                <span class="mission-name">LAUNCH PAD / HOME</span>
                 <span class="mission-icon">🏠</span>
               </div>
-              <div class="mission-desc">Return along runway spine to origin home position.</div>
-              <div class="mission-target-coords">X=0.0m, Y=0.0m, Z=1.0m</div>
+              <div class="mission-desc">Return along runway spine to origin home station.</div>
+              <div class="mission-target-coords" style="color: var(--mint-bright);">Visual Target: Primary Base Station</div>
             </div>
 
             <!-- Grand Tour Featured Card -->
             <div class="mission-card" data-target="grand_tour" onclick="selectMission('grand_tour')" style="grid-column: span 2; background: linear-gradient(135deg, rgba(255, 184, 0, 0.12) 0%, rgba(0, 229, 255, 0.08) 100%); border-color: rgba(255, 184, 0, 0.4);">
               <div class="mission-header">
-                <span class="mission-name" style="color: var(--amber-bright); font-weight: 700;">🚀 GRAND TOUR (FULL ARENA SEQUENCE)</span>
+                <span class="mission-name" style="color: var(--amber-bright); font-weight: 700;">🚀 FULL ARENA INSPECTION SEQUENCE</span>
                 <span class="mission-icon">🌐</span>
               </div>
-              <div class="mission-desc">Continuous autonomous cruise: Runway Poles ➔ Pad Alpha ➔ Platform Delta ➔ Left Window ➔ Right Arch ➔ Origin (Seamless zero-reset).</div>
+              <div class="mission-desc">Continuous autonomous visual cruise: Two Poles ➔ Orange Pad ➔ Yellow Platform ➔ Window ➔ Arch ➔ Home (Seamless zero-reset).</div>
               <div class="mission-target-coords" style="color: var(--cyan-bright);">Full 5-Landmark Arena Loop (Autonomous In-Air Sequencing)</div>
             </div>
           </div>
@@ -1134,88 +1084,19 @@
               </label>
             </div>
           </div>
-        </div>
-      </section>
 
-      <!-- Physical Chaos & Dynamic Disturbance Injector -->
-      <section class="dashboard-panel">
-        <div class="panel-header">
-          <div class="panel-title">
-            <span class="icon">🌪️</span> Physical Chaos & Robustness Testing
-          </div>
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <span id="chaos-status-pill" style="font-family: var(--font-mono); font-size: 10px; padding: 2px 8px; border-radius: 4px; background: rgba(0, 255, 157, 0.12); border: 1px solid rgba(0, 255, 157, 0.4); color: var(--mint-bright); font-weight: 700;">
-              STATUS: NOMINAL (CLEAN)
-            </span>
-            <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 10px;" onclick="triggerGust(6.0)">💨 PULSE GUST (6N)</button>
-          </div>
-        </div>
-
-        <div class="panel-body">
-          <div class="chaos-grid">
-            <div class="chaos-card" id="chaos-card-1" onclick="toggleChaosPreset('1')">
-              <div class="chaos-card-header">
-                <span class="chaos-name">💥 Motor 1 Cut</span>
-                <span class="chaos-badge">M1 40%</span>
-              </div>
-              <div class="chaos-desc">40% thrust loss + blade flutter</div>
-            </div>
-
-            <div class="chaos-card" id="chaos-card-2" onclick="toggleChaosPreset('2')">
-              <div class="chaos-card-header">
-                <span class="chaos-name">💨 6.5N Crosswind</span>
-                <span class="chaos-badge">+X WIND</span>
-              </div>
-              <div class="chaos-desc">6.5N lateral push + Dryden turbulence</div>
-            </div>
-
-            <div class="chaos-card" id="chaos-card-3" onclick="toggleChaosPreset('3')">
-              <div class="chaos-card-header">
-                <span class="chaos-name">📦 Tethered Cargo</span>
-                <span class="chaos-badge">0.35kg BOB</span>
-              </div>
-              <div class="chaos-desc">0.35kg swinging bob + wind drag</div>
-            </div>
-
-            <div class="chaos-card" id="chaos-card-4" onclick="toggleChaosPreset('4')">
-              <div class="chaos-card-header">
-                <span class="chaos-name">⚡ IMU Chatter</span>
-                <span class="chaos-badge">0.85 rad/s</span>
-              </div>
-              <div class="chaos-desc">0.85 rad/s gyro noise + vibration</div>
-            </div>
-
-            <div class="chaos-card" id="chaos-card-5" onclick="toggleChaosPreset('5')">
-              <div class="chaos-card-header">
-                <span class="chaos-name">🌪️ Triple Stress</span>
-                <span class="chaos-badge">COMPOUND</span>
-              </div>
-              <div class="chaos-desc">M1 cut (50%) + 5.0N Wind + Cargo</div>
-            </div>
-
-            <div class="chaos-card active" id="chaos-card-0" onclick="clearAllChaos()">
-              <div class="chaos-card-header">
-                <span class="chaos-name">🟢 Clean Nominal</span>
-                <span class="chaos-badge" style="color: var(--mint-bright); border-color: rgba(0, 255, 157, 0.4);">PRISTINE</span>
-              </div>
-              <div class="chaos-desc">Clear disturbances & restore hover</div>
-            </div>
-          </div>
-
-          <!-- Active Chaos Telemetry & Recovery Ribbon -->
-          <div class="chaos-ribbon" id="chaos-telemetry-ribbon">
-            <div class="chaos-stat">
-              <span class="k">L1 OBSERVED FORCE</span>
-              <span class="v" id="lbl-chaos-force">Fx: +0.0N | Fy: +0.0N | ||F||: 0.0N</span>
-            </div>
-            <div class="chaos-stat">
-              <span class="k">SYSTEM-2 RECOVERY PATCH</span>
-              <span class="v cyan" id="lbl-chaos-compensation">Feedforward: [0.0, 0.0]N | Motor Trim: [1.0, 1.0, 1.0, 1.0]</span>
-            </div>
-            <div class="chaos-stat">
-              <span class="k">TRAJECTORY RETENTION</span>
-              <span class="v mint" id="lbl-chaos-trajectory">Flight path locked on target</span>
-            </div>
+          <!-- Disturbance Injection Quick Toggles -->
+          <div style="display: flex; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: 11px;">
+            <span style="color: var(--text-dim);">CHAOS INJECTION:</span>
+            <button class="btn btn-secondary" id="btn-chaos-wind" style="padding: 4px 10px; font-size: 11px;" onclick="toggleChaos('wind')">
+              💨 +5.0N LATERAL WIND
+            </button>
+            <button class="btn btn-secondary" id="btn-chaos-motor" style="padding: 4px 10px; font-size: 11px;" onclick="toggleChaos('motor')">
+              ⚠️ 40% MOTOR 1 CUT
+            </button>
+            <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px;" onclick="toggleChaos('none')">
+              🟢 CLEAR DISTURBANCES
+            </button>
           </div>
         </div>
       </section>
@@ -1520,8 +1401,13 @@
 
       // Header readouts
       document.getElementById("hdr-sim-time").innerText = `${data.time.toFixed(2)}s`;
-      document.getElementById("hdr-mission").innerText = (data.mission || "ALPHA").toUpperCase();
+      document.getElementById("hdr-mission").innerText = (data.semantic_target || data.mission || "ORANGE PAD").toUpperCase();
       document.getElementById("hdr-pos-err").innerText = `${data.pos_error.toFixed(2)}m`;
+
+      const radarBadge = document.getElementById("radar-target-badge");
+      if (radarBadge) {
+        radarBadge.innerText = `TARGET: ${(data.semantic_target || data.mission || 'ORANGE PAD').toUpperCase()}`;
+      }
 
       // Status pill
       const badge = document.getElementById("badge-mission-status");
@@ -1584,37 +1470,21 @@
       if (data.events && Array.isArray(data.events)) {
         const feed = document.getElementById("events-feed-list");
         if (feed) {
-          feed.innerHTML = data.events.slice(0, 10).map(e => `
-            <div class="event-item">
+          feed.innerHTML = data.events.slice(0, 10).map(e => {
+            const isIntent = e.type === "SYSTEM2_INTENT";
+            const topStyle = isIntent ? 'style="color: var(--purple-bright); font-weight: 700;"' : '';
+            const borderStyle = isIntent ? 'style="border-left: 3px solid var(--purple-bright); background: rgba(181, 108, 255, 0.08);"' : '';
+            return `
+            <div class="event-item" ${borderStyle}>
               <div class="event-top">
-                <span>${e.type}</span>
+                <span ${topStyle}>${isIntent ? "🧠 " + e.type : e.type}</span>
                 <span>t=${e.time.toFixed(2)}s</span>
               </div>
-              <div class="event-desc">${e.reason}</div>
+              <div class="event-desc" style="color: ${isIntent ? '#FFFFFF' : 'var(--text-main)'}; font-weight: ${isIntent ? '600' : 'normal'};">${e.reason}</div>
+              ${e.diagnosis ? `<div style="font-size: 10px; color: ${isIntent ? 'var(--cyan-bright)' : 'var(--text-dim)'}; margin-top: 2px; font-family: var(--font-mono);">${e.diagnosis}</div>` : ""}
             </div>
-          `).join("");
-        }
-      }
-
-      // Update Chaos Injector UI & Readouts
-      updateChaosUI(data.active_presets || []);
-      const chaosForceEl = document.getElementById("lbl-chaos-force");
-      if (chaosForceEl && data.l1_force) {
-        chaosForceEl.innerText = `Fx: ${data.l1_force[0] >= 0 ? "+" : ""}${data.l1_force[0].toFixed(1)}N | Fy: ${data.l1_force[1] >= 0 ? "+" : ""}${data.l1_force[1].toFixed(1)}N | ||F||: ${data.l1_force_norm.toFixed(1)}N`;
-      }
-      const chaosCompEl = document.getElementById("lbl-chaos-compensation");
-      if (chaosCompEl && data.feedforward_force && data.motor_trim) {
-        chaosCompEl.innerText = `Feedforward: [${data.feedforward_force[0].toFixed(1)}, ${data.feedforward_force[1].toFixed(1)}]N | Motor Trim: [${data.motor_trim.join(", ")}]`;
-      }
-      const chaosTrajEl = document.getElementById("lbl-chaos-trajectory");
-      if (chaosTrajEl) {
-        const isDisturbed = (data.active_presets && data.active_presets.length > 0) || (data.l1_force_norm > 1.5);
-        if (isDisturbed) {
-          chaosTrajEl.innerText = `Compensating disturbance -> Path locked on ${data.mission.toUpperCase()} (${data.phase})`;
-          chaosTrajEl.className = "v amber";
-        } else {
-          chaosTrajEl.innerText = `Flight path locked on ${data.mission.toUpperCase()} (${data.phase})`;
-          chaosTrajEl.className = "v mint";
+            `;
+          }).join("");
         }
       }
 
@@ -1634,6 +1504,63 @@
       renderArenaRadar(data);
 
       document.getElementById("lbl-chart-stats").innerText = `X: ${data.pos[0].toFixed(2)}m | Y: ${data.pos[1].toFixed(2)}m | Z: ${data.pos[2].toFixed(2)}m`;
+    }
+
+    // Natural Language Instruction Controller
+    function setInstructionPrompt(text) {
+      const input = document.getElementById("nl-instruction-input");
+      if (input) {
+        input.value = text;
+        input.focus();
+      }
+    }
+
+    async function executeNLInstruction() {
+      const input = document.getElementById("nl-instruction-input");
+      const btn = document.getElementById("btn-execute-nl");
+      const text = input ? input.value.trim() : "";
+      if (!text) return;
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span>⏳</span> PARSING...`;
+      }
+
+      try {
+        const resp = await fetch("/api/navigation/instruction", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ instruction: text, use_llm: true }),
+        });
+        const data = await resp.json();
+
+        // Highlight corresponding mission card in UI
+        if (data.target_action) {
+          selectMission(data.target_action, false);
+        }
+
+        // Display real-time LLM intent feedback card
+        const fb = document.getElementById("nl-intent-feedback");
+        const fbTarget = document.getElementById("nl-intent-target");
+        const fbConf = document.getElementById("nl-intent-conf");
+        const fbVisual = document.getElementById("nl-intent-visual");
+        const fbReason = document.getElementById("nl-intent-reason");
+
+        if (fb) {
+          fb.style.display = "block";
+          fbTarget.innerText = `🎯 IDENTIFIED TARGET: ${data.semantic_label.toUpperCase()} (${data.target_action})`;
+          fbConf.innerText = `CONFIDENCE: ${(data.confidence * 100).toFixed(0)}% [${data.source.toUpperCase()}]`;
+          fbVisual.innerText = `👁️ VISUAL CUES: ${data.visual_features}`;
+          fbReason.innerText = `🧠 SYSTEM 2 REASONING: "${data.intent_reasoning}"`;
+        }
+      } catch (err) {
+        console.error("Instruction execution error:", err);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = `<span>⚡</span> PARSE &amp; EXECUTE`;
+        }
+      }
     }
 
     // Mission Selector Click (Seamless in-flight retarget)
@@ -1745,7 +1672,7 @@
       ctx.stroke();
       ctx.fillStyle = "rgba(0, 229, 255, 0.75)";
       ctx.font = `${8 * dpr}px JetBrains Mono, monospace`;
-      ctx.fillText("ORIGIN [0,0]", origX - 24 * dpr, origY + 16 * dpr);
+      ctx.fillText("LAUNCH PAD", origX - 22 * dpr, origY + 16 * dpr);
 
       // B. Runway Entrance Pylons [3.5, ±0.9]
       const [pylL_X, pylL_Y] = toC(3.5, 0.9);
@@ -1763,7 +1690,7 @@
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = "#FF8099";
-      ctx.fillText("POLES (3.5m)", pylL_X - 22 * dpr, pylL_Y - 8 * dpr);
+      ctx.fillText("TWO PYLONS", pylL_X - 22 * dpr, pylL_Y - 8 * dpr);
 
       // C. Target Pad Alpha [5.5, 0.0]
       const [alpX, alpY] = toC(5.5, 0.0);
@@ -1777,7 +1704,7 @@
       ctx.beginPath();
       ctx.arc(alpX, alpY, 2.5 * dpr, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillText("ALPHA (5.5m)", alpX - 22 * dpr, alpY + 20 * dpr);
+      ctx.fillText("ORANGE PAD", alpX - 22 * dpr, alpY + 20 * dpr);
 
       // D. Elevated Platform Delta [8.0, 0.0]
       const [delX, delY] = toC(8.0, 0.0);
@@ -1788,7 +1715,7 @@
       ctx.fillStyle = "rgba(255, 221, 0, 0.15)";
       ctx.fillRect(delX - dSz, delY - dSz, dSz * 2, dSz * 2);
       ctx.fillStyle = "#FFDD00";
-      ctx.fillText("DELTA (8.0m)", delX - 22 * dpr, delY + 20 * dpr);
+      ctx.fillText("YELLOW PLATFORM", delX - 32 * dpr, delY + 20 * dpr);
 
       // E. Left Window [0.0, 5.0]
       const [winX, winY] = toC(0.0, 5.0);
@@ -1808,7 +1735,7 @@
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = "#00E5FF";
-      ctx.fillText("WINDOW (+90°)", winX - 28 * dpr, winY - 8 * dpr);
+      ctx.fillText("WALL WINDOW", winX - 28 * dpr, winY - 8 * dpr);
 
       // F. Right Arch [0.0, -5.0]
       const [arcX, arcY] = toC(0.0, -5.0);
@@ -1828,7 +1755,7 @@
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = "#FF8833";
-      ctx.fillText("ARCH (-90°)", arcX - 24 * dpr, arcY + 16 * dpr);
+      ctx.fillText("ARCHWAY", arcX - 20 * dpr, arcY + 16 * dpr);
 
       // 3. Flight Breadcrumb Trail
       const curX = data.pos[0];
@@ -1922,98 +1849,13 @@
       }
     }
 
-    // Physical Chaos & Disturbance Controls
-    function toggleChaosPreset(presetId) {
-      fetch("/api/navigation/chaos/preset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ preset_id: String(presetId), toggle: true, additive: true })
-      })
-      .then(r => r.json())
-      .then(data => {
-        updateChaosUI(data.active_presets || []);
-      })
-      .catch(e => console.error("Error toggling chaos preset:", e));
-    }
-
-    function triggerGust(force) {
-      fetch("/api/navigation/chaos/gust", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ force: force || 6.0, duration_s: 0.8, direction: [1.0, 0.0, 0.0] })
-      })
-      .then(r => r.json())
-      .then(data => {
-        console.log("Gust triggered:", data.message);
-      })
-      .catch(e => console.error("Error triggering wind gust:", e));
-    }
-
-    function clearAllChaos() {
-      fetch("/api/navigation/chaos/clear", { method: "POST" })
-        .then(r => r.json())
-        .then(() => updateChaosUI([]))
-        .catch(e => console.error("Error clearing chaos:", e));
-    }
-
-    function updateChaosUI(activePresets) {
-      const presets = activePresets || [];
-      const hasChaos = presets.length > 0;
-
-      // Update card highlighted active states
-      for (let i = 1; i <= 5; i++) {
-        const card = document.getElementById(`chaos-card-${i}`);
-        if (card) {
-          if (presets.includes(String(i))) {
-            card.classList.add("active");
-          } else {
-            card.classList.remove("active");
-          }
-        }
-      }
-      const cleanCard = document.getElementById("chaos-card-0");
-      if (cleanCard) {
-        if (!hasChaos) {
-          cleanCard.classList.add("active");
-        } else {
-          cleanCard.classList.remove("active");
-        }
-      }
-
-      // Update header status badge
-      const pill = document.getElementById("chaos-status-pill");
-      if (pill) {
-        if (!hasChaos) {
-          pill.innerText = "STATUS: NOMINAL (CLEAN)";
-          pill.style.color = "var(--mint-bright)";
-          pill.style.background = "rgba(0, 255, 157, 0.12)";
-          pill.style.borderColor = "rgba(0, 255, 157, 0.4)";
-        } else {
-          const names = presets.map(p => {
-            if (p === "1") return "M1 CUT";
-            if (p === "2") return "6.5N WIND";
-            if (p === "3") return "CARGO";
-            if (p === "4") return "IMU CHATTER";
-            if (p === "5") return "TRIPLE STRESS";
-            return `PRESET ${p}`;
-          });
-          pill.innerText = `CHAOS ACTIVE: [${names.join(" | ")}]`;
-          pill.style.color = "var(--amber-bright)";
-          pill.style.background = "rgba(255, 184, 0, 0.15)";
-          pill.style.borderColor = "rgba(255, 184, 0, 0.4)";
-        }
-      }
-    }
-
-    // Backward-compatible toggleChaos
+    // Chaos Toggles
     function toggleChaos(type) {
       fetch("/api/navigation/chaos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chaos_type: type, active: type !== "none" })
-      })
-      .then(r => r.json())
-      .then(data => updateChaosUI(data.active_presets || []));
+      });
     }
 
     // Live Gemini VLM Toggle

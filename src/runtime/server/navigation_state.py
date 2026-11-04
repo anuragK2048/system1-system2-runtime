@@ -31,6 +31,7 @@ from PIL import Image
 from runtime.sim.config import DroneConfig, SimConfig
 from runtime.sim.simulator import DroneSimulator
 from runtime.sim.autonomous_target_flight import AutonomousTargetNavigator, SCENE_PATH
+from runtime.brain.intent_parser import ARENA_LANDMARKS, NaturalLanguageIntent
 from vlm.hud_overlay import HUDProjector, Aperture3D
 
 
@@ -96,6 +97,9 @@ class NavigationSimulationCoordinator:
             self.drone_cfg = DroneConfig(spawn_pos=[0.0, 0.0, 0.8])
             self.sim: DroneSimulator = DroneSimulator(scene_path=SCENE_PATH, drone_cfg=self.drone_cfg)
             self.target_mission: str = "alpha"
+            self.active_semantic_label: str = "Orange Landing Pad"
+            self.active_instruction: str = ""
+            self.last_parsed_intent: Optional[Dict[str, Any]] = None
             self.use_vlm: bool = False
             self.vlm_model: str = "gemini-3.5-flash-lite"
             self.chaos_mode: Optional[str] = None
@@ -165,6 +169,8 @@ class NavigationSimulationCoordinator:
         """
         with self._lock:
             target_clean = target.lower().strip()
+            if target_clean in ARENA_LANDMARKS:
+                self.active_semantic_label = ARENA_LANDMARKS[target_clean]["semantic_label"]
 
             # Check if drone is currently airborne and we can seamlessly retarget
             is_airborne = (
@@ -269,6 +275,42 @@ class NavigationSimulationCoordinator:
                 "chaos": self.chaos_mode,
                 "duration": self.max_duration,
             }
+
+    def execute_instruction(self, intent: NaturalLanguageIntent) -> Dict[str, Any]:
+        """Translates a parsed natural language instruction into airborne navigation execution."""
+        with self._lock:
+            self.active_instruction = intent.raw_instruction
+            self.active_semantic_label = intent.semantic_label
+            self.last_parsed_intent = intent.to_dict()
+
+            # Record high-visibility System 2 Intent Event in telemetry log
+            t_sim = float(self.sim.data.time)
+            self._record_event(
+                sim_time=t_sim,
+                event_type="SYSTEM2_INTENT",
+                reason=f"\"{intent.raw_instruction}\" ➔ {intent.semantic_label}",
+                diagnosis=f"{intent.intent_reasoning} | Visual: {intent.visual_features} (Confidence: {int(intent.confidence*100)}%, via {intent.source})",
+            )
+
+        # Launch or retarget airborne flight
+        res = self.start_mission(
+            target=intent.target_action,
+            use_vlm=True,
+            reset=False,
+        )
+
+        return {
+            "status": "executed",
+            "instruction": intent.raw_instruction,
+            "target_action": intent.target_action,
+            "semantic_label": intent.semantic_label,
+            "visual_features": intent.visual_features,
+            "intent_reasoning": intent.intent_reasoning,
+            "confidence": intent.confidence,
+            "source": intent.source,
+            "flight_status": res.get("status"),
+            "sim_time": float(round(self.sim.data.time, 2)),
+        }
 
     def stop_mission(self, status: str = "stopped") -> Dict[str, Any]:
         """Stops active mission execution and transitions drone to reflexive hold."""
@@ -549,6 +591,9 @@ class NavigationSimulationCoordinator:
         return {
             "time": sim_time_val,
             "mission": self.target_mission,
+            "semantic_target": self.active_semantic_label,
+            "active_instruction": self.active_instruction,
+            "last_intent": self.last_parsed_intent,
             "status": self.mission_status,
             "is_running": self.is_running,
             "mission_complete": bool(self.navigator.mission_complete),
