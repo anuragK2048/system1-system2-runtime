@@ -131,6 +131,40 @@ class TestEventDrivenTriggersAndGuidance(unittest.TestCase):
         self.assertIn("PHASE_", patch.flight_phase)
         self.assertIsNotNone(patch.waypoint_command)
 
+    def test_no_duplicate_meta_llama_prefix(self):
+        """Verifies [META LLAMA 3.2 VISION] is never duplicated in diagnosis."""
+        from runtime.sim.autonomous_target_flight import sanitize_diagnosis, System2Patch
+
+        # Test sanitize helper directly with various duplicates
+        double = "[META LLAMA 3.2 VISION] [META LLAMA 3.2 VISION] Target Locked (0°)"
+        clean = sanitize_diagnosis(double)
+        self.assertEqual(clean.count("[META LLAMA 3.2 VISION]"), 1)
+        self.assertFalse(clean.startswith("[META LLAMA 3.2 VISION] [META LLAMA 3.2 VISION]"))
+
+        # Test merge_vlm_patch with existing prefix
+        cand = System2Patch(diagnosis="[META LLAMA 3.2 VISION] Base", flight_phase="PHASE_1")
+        vlm = System2Patch(diagnosis="[META LLAMA 3.2 VISION] Disturbance correction", flight_phase="PHASE_1")
+        merged = self.navigator._merge_vlm_patch(cand, vlm)
+        self.assertEqual(merged.diagnosis.count("[META LLAMA 3.2 VISION]"), 1)
+
+    def test_latency_static_when_patch_message_unchanged(self):
+        """Verifies VLA latency remains strictly static when diagnosis message does not change."""
+        telemetry = self.navigator.get_onboard_telemetry()
+
+        # Initial call establishes diagnosis and latency
+        p1 = self.navigator._visual_inertial_reasoner(telemetry, sim_time=1.0)
+        lat1 = self.navigator._last_vlm_latency_ms
+
+        # Run 10 subsequent reasoning cycles with identical telemetry/phase (unchanging message)
+        for i in range(10):
+            p = self.navigator._visual_inertial_reasoner(telemetry, sim_time=1.0 + i * 0.1)
+            self.assertEqual(p.diagnosis, p1.diagnosis)
+            self.assertEqual(
+                self.navigator._last_vlm_latency_ms,
+                lat1,
+                "Latency should remain unchanged while the patch message is identical",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

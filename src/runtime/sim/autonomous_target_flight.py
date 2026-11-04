@@ -97,6 +97,22 @@ ARENA_APERTURES = [
 ]
 
 
+def sanitize_diagnosis(text: str) -> str:
+    """Ensures [META LLAMA 3.2 VISION] prefix appears exactly once without duplication."""
+    if not text:
+        return "[META LLAMA 3.2 VISION] Nominal flight"
+    diag = text.strip()
+    while "[META LLAMA 3.2 VISION] [META LLAMA 3.2 VISION]" in diag:
+        diag = diag.replace("[META LLAMA 3.2 VISION] [META LLAMA 3.2 VISION]", "[META LLAMA 3.2 VISION]")
+    while "[META LLAMA 3.2 VISION] [META LLAMA 3.2 VISION | MODAL A100]" in diag:
+        diag = diag.replace("[META LLAMA 3.2 VISION] [META LLAMA 3.2 VISION | MODAL A100]", "[META LLAMA 3.2 VISION]")
+    while "[META LLAMA 3.2 VISION | MODAL A100] [META LLAMA 3.2 VISION]" in diag:
+        diag = diag.replace("[META LLAMA 3.2 VISION | MODAL A100] [META LLAMA 3.2 VISION]", "[META LLAMA 3.2 VISION]")
+    if not diag.startswith("[META LLAMA 3.2 VISION]"):
+        diag = f"[META LLAMA 3.2 VISION] {diag}"
+    return diag
+
+
 class AutonomousTargetNavigator:
     """Coordinates autonomous visual-inertial navigation using onboard sensors and FPV image only."""
 
@@ -154,6 +170,7 @@ class AutonomousTargetNavigator:
         self._last_vlm_pos_err = 0.0
         self._vlm_call_count = 0
         self._last_vlm_latency_ms = random.randint(400, 700)
+        self._active_patch_diagnosis: str = ""
 
         # Asynchronous non-blocking VLM background executor
         self._vlm_pool: Optional[concurrent.futures.ThreadPoolExecutor] = concurrent.futures.ThreadPoolExecutor(
@@ -189,6 +206,13 @@ class AutonomousTargetNavigator:
                 except Exception:
                     pass
             self._renderer = None
+
+    def _sync_patch_latency(self, new_diagnosis: str) -> None:
+        """Recalculates VLA latency strictly when the cognitive diagnosis message changes."""
+        clean_diag = sanitize_diagnosis(new_diagnosis)
+        if clean_diag != self._active_patch_diagnosis:
+            self._last_vlm_latency_ms = random.randint(400, 700)
+            self._active_patch_diagnosis = clean_diag
 
     def retarget(self, target: str) -> None:
         """Seamlessly transitions autonomous navigation to a new target while airborne."""
@@ -297,8 +321,12 @@ class AutonomousTargetNavigator:
 
     def _query_live_vlm(self, img_path: Path, telemetry: dict) -> Optional[System2Patch]:
         """Synthesizes System 2 VLA visual guidance locally (no external network API calls)."""
-        self._last_vlm_latency_ms = random.randint(400, 700)
         patch = self._visual_inertial_reasoner(telemetry, float(self.sim.data.time))
+        # An explicit VLA invocation queries the model, generating a new response latency
+        self._last_vlm_latency_ms = random.randint(400, 700)
+        if patch:
+            patch.diagnosis = sanitize_diagnosis(patch.diagnosis)
+            self._active_patch_diagnosis = patch.diagnosis
         return patch
 
     def should_query_vlm(
@@ -427,7 +455,7 @@ class AutonomousTargetNavigator:
         if dist_xy > 0.35 and abs_yaw_err > fov_lock_deg:
             diag = (
                 f"[META LLAMA 3.2 VISION] Active Visual Saccade: Rotating in-place to {desired_yaw_deg:.0f}° "
-                f"to acquire {target_name} (Bearing: {desired_yaw_deg:.0f}°, Range: {dist_3d:.1f}m, Δψ: {abs_yaw_err:.0f}°)"
+                f"to acquire {target_name}"
             )
             cmd = WaypointCommand(
                 mode="world",
@@ -440,7 +468,7 @@ class AutonomousTargetNavigator:
 
         diag = (
             f"[META LLAMA 3.2 VISION] Target Locked ({desired_yaw_deg:.0f}°): Advancing forward along "
-            f"direct visual intercept to {target_name} (Range: {dist_3d:.1f}m)"
+            f"direct visual intercept to {target_name}"
         )
         cmd = WaypointCommand(
             mode="world",
@@ -787,8 +815,8 @@ class AutonomousTargetNavigator:
                     print("🏆 [GRAND TOUR COMPLETE] All arena landmarks successfully navigated!")
                     self.grand_tour_mode = False
 
-        # Recalculate VLA latency dynamically on every patch creation (400 - 700 ms per user specification)
-        self._last_vlm_latency_ms = random.randint(400, 700)
+        diagnosis = sanitize_diagnosis(diagnosis)
+        self._sync_patch_latency(diagnosis)
 
         return System2Patch(
             diagnosis=diagnosis,
@@ -803,9 +831,10 @@ class AutonomousTargetNavigator:
 
     def _merge_vlm_patch(self, candidate: System2Patch, vlm: System2Patch) -> System2Patch:
         """Merges VLM physical disturbance corrections with the candidate mission navigation trajectory."""
-        self._last_vlm_latency_ms = random.randint(400, 700)
+        vlm_diag = sanitize_diagnosis(vlm.diagnosis) if (vlm and vlm.diagnosis) else candidate.diagnosis
+        self._sync_patch_latency(vlm_diag)
         merged = System2Patch(
-            diagnosis=f"[META LLAMA 3.2 VISION] {vlm.diagnosis}",
+            diagnosis=vlm_diag,
             flight_phase=self.phase,
             waypoint_command=candidate.waypoint_command,  # Always preserve active global navigation trajectory
             feedforward_force_offset=vlm.feedforward_force_offset or candidate.feedforward_force_offset,

@@ -611,7 +611,9 @@ class NavigationSimulationCoordinator:
             if active_patch.safety_envelope and active_patch.safety_envelope.max_tilt_deg:
                 max_tilt_clamp = float(active_patch.safety_envelope.max_tilt_deg)
             if active_patch.diagnosis:
-                diagnosis_str = active_patch.diagnosis
+                diagnosis_str = active_patch.diagnosis.strip()
+                while "[META LLAMA 3.2 VISION] [META LLAMA 3.2 VISION]" in diagnosis_str:
+                    diagnosis_str = diagnosis_str.replace("[META LLAMA 3.2 VISION] [META LLAMA 3.2 VISION]", "[META LLAMA 3.2 VISION]")
 
         return {
             "time": sim_time_val,

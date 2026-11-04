@@ -1159,13 +1159,13 @@
           <div class="panel-title">
             <span class="icon">🧠</span> System 2 Cognitive Patch & Guidance
           </div>
-          <span style="font-size: 11px; font-family: var(--font-mono); color: var(--cyan-bright);" id="vlm-call-counter">VLA LATENCY: 240ms (MODAL A100)</span>
+          <span style="font-size: 11px; font-family: var(--font-mono); color: var(--cyan-bright);" id="vlm-call-counter">VLA LATENCY: 520ms (MODAL A100)</span>
         </div>
 
         <div class="panel-body">
           <div class="patch-box">
             <div class="patch-diagnosis" id="patch-diagnosis-text">
-              [META LLAMA 3.2 VISION | MODAL A100] Nominal flight: Liftoff to nominal hover altitude (Z=1.0m)
+              [META LLAMA 3.2 VISION] Nominal flight: Liftoff to nominal hover altitude (Z=1.0m)
             </div>
 
             <div class="patch-metrics-row">
@@ -1355,7 +1355,11 @@
 
       // System 2 Patch Box (in direct real-time sync with System 1 reflex loop inputs)
       const cmdYaw = data.cmd_yaw_deg !== undefined ? data.cmd_yaw_deg : (data.attitude ? data.attitude.yaw : 0);
-      document.getElementById("patch-diagnosis-text").innerText = data.diagnosis || "[META LLAMA 3.2 VISION | MODAL A100] Nominal flight";
+      let rawDiag = data.diagnosis || "[META LLAMA 3.2 VISION] Nominal flight";
+      while (rawDiag.includes("[META LLAMA 3.2 VISION] [META LLAMA 3.2 VISION]")) {
+        rawDiag = rawDiag.replace("[META LLAMA 3.2 VISION] [META LLAMA 3.2 VISION]", "[META LLAMA 3.2 VISION]");
+      }
+      document.getElementById("patch-diagnosis-text").innerText = rawDiag;
       const elTgtName = document.getElementById("patch-target-name");
       if (elTgtName) {
         const tgtLabel = data.semantic_target ? data.semantic_target.toUpperCase() : (data.mission ? data.mission.toUpperCase() : "ORANGE LANDING PAD");
@@ -1366,7 +1370,7 @@
       if (elCmdYaw) elCmdYaw.innerText = `${cmdYaw >= 0 ? "+" : ""}${cmdYaw.toFixed(1)}°`;
       const elLatency = document.getElementById("patch-vla-latency");
       if (elLatency) {
-        const lat = data.vla_latency_ms || 240;
+        const lat = data.vla_latency_ms || 520;
         elLatency.innerText = `${lat} ms (Modal A100)`;
       }
       const elFf = document.getElementById("patch-ff");
@@ -1374,7 +1378,7 @@
       document.getElementById("patch-trim").innerText = `[${data.motor_trim.map(x => x.toFixed(2)).join(", ")}]`;
       document.getElementById("patch-tilt-clamp").innerText = `${data.max_tilt_clamp.toFixed(1)}°`;
       document.getElementById("patch-phase-name").innerText = data.phase;
-      document.getElementById("vlm-call-counter").innerText = `VLA LATENCY: ${data.vla_latency_ms || 240}ms (MODAL A100)`;
+      document.getElementById("vlm-call-counter").innerText = `VLA LATENCY: ${data.vla_latency_ms || 520}ms (MODAL A100)`;
       if (data.camera_mode && data.camera_mode !== currentCameraMode) {
         updateCameraModeUI(data.camera_mode);
       }
