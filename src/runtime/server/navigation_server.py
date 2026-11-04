@@ -402,6 +402,8 @@ app = create_navigation_app()
 
 def main():
     """Parses CLI arguments and launches navigation server on specified port."""
+    import os
+    import sys
     import threading
     parser = argparse.ArgumentParser(description="Single-Drone Target Navigation Dashboard & Server")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host interface (default: 0.0.0.0)")
@@ -410,6 +412,18 @@ def main():
     parser.add_argument("--use-vlm", action="store_true", help="Enable live Gemini VLM on launch")
     parser.add_argument("--gui", action="store_true", help="Launch native 60 FPS MuJoCo 3D viewer window in parallel with web cockpit")
     args = parser.parse_args()
+
+    # macOS MuJoCo Native Viewer Trampoline
+    if args.gui and sys.platform == "darwin":
+        try:
+            import mujoco.viewer
+            if not isinstance(getattr(mujoco.viewer, "_MJPYTHON", None), getattr(mujoco.viewer, "_MjPythonBase", object)):
+                exe_dir = Path(sys.executable).parent
+                mjpy = exe_dir / "mjpython"
+                if mjpy.exists():
+                    os.execv(str(mjpy), [str(mjpy)] + sys.argv)
+        except Exception:
+            pass
 
     if args.autostart:
         nav_coordinator.start_mission(target=args.autostart, use_vlm=args.use_vlm)
@@ -443,21 +457,29 @@ def main():
             server_thread = threading.Thread(target=server.run, daemon=True, name="UvicornServerThread")
             server_thread.start()
 
-            with mujoco.viewer.launch_passive(
-                nav_coordinator.sim.model,
-                nav_coordinator.sim.data,
-                key_callback=native_3d_hud.handle_key,
-            ) as viewer:
-                viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
-                viewer.cam.trackbodyid = nav_coordinator.sim.drone_body_id
-                viewer.cam.distance = 2.8
-                viewer.cam.elevation = -18.0
+            try:
+                with mujoco.viewer.launch_passive(
+                    nav_coordinator.sim.model,
+                    nav_coordinator.sim.data,
+                    key_callback=native_3d_hud.handle_key,
+                ) as viewer:
+                    viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+                    viewer.cam.trackbodyid = nav_coordinator.sim.drone_body_id
+                    viewer.cam.distance = 2.8
+                    viewer.cam.elevation = -18.0
 
-                while viewer.is_running() and not nav_coordinator.shutdown_event.is_set():
-                    with viewer.lock():
-                        native_3d_hud.render(viewer.user_scn, nav_coordinator.sim, nav_coordinator)
-                    viewer.sync()
-                    time.sleep(1.0 / 60.0)
+                    while viewer.is_running() and not nav_coordinator.shutdown_event.is_set():
+                        with viewer.lock():
+                            native_3d_hud.render(viewer.user_scn, nav_coordinator.sim, nav_coordinator)
+                        viewer.sync()
+                        time.sleep(1.0 / 60.0)
+            except RuntimeError as gui_err:
+                print(f"\n⚠️  [GUI LAUNCH ERROR] {gui_err}")
+                print("👉 On macOS, launch with mjpython to open the native 3D OpenGL window:")
+                print(f"   uv run mjpython scripts/run_navigation_dashboard.py --gui --port {args.port}\n")
+                print(f"🌐 Web Cockpit is online at: http://localhost:{args.port}")
+                while not nav_coordinator.shutdown_event.is_set():
+                    time.sleep(0.5)
         else:
             server.run()
     except KeyboardInterrupt:
