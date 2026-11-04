@@ -104,6 +104,7 @@ class AutonomousTargetNavigator:
         use_vlm: bool = False,
         vlm_model: str = "gemini-3.5-flash-lite",
         chaos_type: Optional[str] = None,
+        renderer: Optional[mujoco.Renderer] = None,
     ):
         self.sim = sim
         self.target_mission = target_mission.lower()
@@ -116,7 +117,8 @@ class AutonomousTargetNavigator:
 
         # Visual HUD & Camera Renderer
         self.hud = HUDProjector(camera_name="fpv", width=480, height=360)
-        self.renderer = mujoco.Renderer(sim.model, height=360, width=480)
+        self._owns_renderer = renderer is None
+        self._renderer: Optional[mujoco.Renderer] = renderer
 
         # Tune bridge trigger threshold for active multi-meter navigation missions
         self.sim.bridge.pos_error_threshold = 1.5
@@ -142,12 +144,24 @@ class AutonomousTargetNavigator:
         self._last_vlm_pos_err = 0.0
         self._vlm_call_count = 0
 
+    @property
+    def renderer(self) -> mujoco.Renderer:
+        if self._renderer is None:
+            self._renderer = mujoco.Renderer(self.sim.model, height=360, width=480)
+        return self._renderer
+
+    @renderer.setter
+    def renderer(self, val: Optional[mujoco.Renderer]) -> None:
+        self._renderer = val
+
     def close(self):
         """Releases renderer resources."""
-        try:
-            self.renderer.close()
-        except Exception:
-            pass
+        if self._renderer is not None and getattr(self, "_owns_renderer", True):
+            try:
+                self._renderer.close()
+            except Exception:
+                pass
+            self._renderer = None
 
     def get_onboard_telemetry(self) -> Dict[str, Any]:
         """Reads strictly onboard sensory estimates (no privileged world targets)."""
@@ -573,10 +587,9 @@ class AutonomousTargetNavigator:
         vlm_invoked = False
 
         if vlm_needed:
-            # Capture live FPV frame with calibrated HUD overlay
-            _, img_path = self.capture_fpv_image_with_hud()
-
             if self.use_vlm:
+                # Capture live FPV frame with calibrated HUD overlay strictly when querying VLM
+                _, img_path = self.capture_fpv_image_with_hud()
                 print(f"🧠 [VLM TRIGGER] t={sim_time:.2f}s: Querying VLM Reasoner ({self.vlm_model}) -> {trigger_reason}")
                 patch = self._query_live_vlm(img_path, telemetry)
                 vlm_invoked = True

@@ -38,6 +38,19 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 FRONTEND_HTML = PROJECT_ROOT / "frontend" / "navigation_dashboard.html"
 
 
+class MissionLaunchRequest(BaseModel):
+    target: str = Field("alpha", description="Target: alpha | delta | runway_poles | window | arch")
+    use_vlm: bool = Field(False, description="Enable live Google Gemini multimodal visual reasoning")
+    model: str = Field("gemini-3.5-flash-lite", description="VLM model identifier")
+    chaos: Optional[str] = Field(None, description="Physical disturbance: wind | motor | None")
+    duration: Optional[float] = Field(None, description="Max mission duration in seconds")
+
+
+class ChaosRequest(BaseModel):
+    chaos_type: Optional[str] = Field("wind", description="wind | motor | none")
+    active: bool = Field(True, description="Enable or disable disturbance")
+
+
 # ==============================================================================
 # WEBSOCKET CONNECTION MANAGER
 # ==============================================================================
@@ -227,17 +240,6 @@ def create_navigation_app() -> FastAPI:
     # --------------------------------------------------------------------------
     # REST Navigation Mission Controls
     # --------------------------------------------------------------------------
-
-    class MissionLaunchRequest(BaseModel):
-        target: str = Field("alpha", description="Target: alpha | delta | runway_poles | window | arch")
-        use_vlm: bool = Field(False, description="Enable live Google Gemini multimodal visual reasoning")
-        model: str = Field("gemini-3.5-flash-lite", description="VLM model identifier")
-        chaos: Optional[str] = Field(None, description="Physical disturbance: wind | motor | None")
-        duration: Optional[float] = Field(None, description="Max mission duration in seconds")
-
-    class ChaosRequest(BaseModel):
-        chaos_type: Optional[str] = Field("wind", description="wind | motor | none")
-        active: bool = Field(True, description="Enable or disable disturbance")
 
     @app.post("/api/navigation/start")
     def start_mission_endpoint(req: MissionLaunchRequest):

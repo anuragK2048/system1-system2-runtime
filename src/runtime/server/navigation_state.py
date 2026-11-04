@@ -100,6 +100,14 @@ class NavigationSimulationCoordinator:
             self.chaos_mode: Optional[str] = None
             self.max_duration: float = 14.0
 
+            # Offscreen OpenGL Renderer State (lazily initialized on the dedicated worker thread)
+            self._renderer: Optional[mujoco.Renderer] = None
+            self._hud: Optional[HUDProjector] = None
+            self._render_data: Optional[mujoco.MjData] = None
+            self._render_pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="NavRendererWorker"
+            )
+
             # Instantiate Navigator
             self.navigator: AutonomousTargetNavigator = AutonomousTargetNavigator(
                 sim=self.sim,
@@ -130,14 +138,6 @@ class NavigationSimulationCoordinator:
             self.peak_tilt_deg: float = 0.0
             self.peak_l1_force_N: float = 0.0
             self.tracking_errors: List[float] = []
-
-            # Offscreen OpenGL Renderer State (pinned to single-worker thread pool)
-            self._renderer: Optional[mujoco.Renderer] = None
-            self._hud: Optional[HUDProjector] = None
-            self._render_data: Optional[mujoco.MjData] = None
-            self._render_pool = concurrent.futures.ThreadPoolExecutor(
-                max_workers=1, thread_name_prefix="NavRendererWorker"
-            )
 
             # Suite evaluation results cache
             self.suite_results: List[Dict[str, Any]] = []
@@ -235,10 +235,14 @@ class NavigationSimulationCoordinator:
         with self._lock:
             self.is_running = False
             self.mission_status = status
-            if self._sim_thread and self._sim_thread.is_alive():
-                # Thread will terminate on is_running=False
+            sim_th = self._sim_thread
+
+        if sim_th and sim_th.is_alive() and threading.current_thread() != sim_th:
+            try:
+                sim_th.join(timeout=1.0)
+            except Exception:
                 pass
-            return {"status": self.mission_status, "sim_time": float(self.sim.data.time)}
+        return {"status": self.mission_status, "sim_time": float(self.sim.data.time)}
 
     def reset_to_origin(self) -> Dict[str, Any]:
         """Resets the drone back to origin pad and halts movement."""
@@ -284,66 +288,73 @@ class NavigationSimulationCoordinator:
         wall_start = time.time()
         sim_start_t = float(self.sim.data.time)
 
-        while self.is_running and not self.shutdown_event.is_set():
-            t_sim = float(self.sim.data.time)
+        try:
+            while self.is_running and not self.shutdown_event.is_set():
+                t_sim = float(self.sim.data.time)
 
-            if t_sim >= self.max_duration:
-                with self._lock:
-                    self.mission_status = "completed" if self.navigator.mission_complete else "timeout"
-                    self.is_running = False
-                break
+                if t_sim >= self.max_duration:
+                    with self._lock:
+                        self.mission_status = "completed" if self.navigator.mission_complete else "timeout"
+                        self.is_running = False
+                    break
 
-            # 1. System 2 Cognitive Cycle (2 Hz or event-driven)
-            entry = self.navigator.step_cognitive_cycle(t_sim)
-            if entry and entry.get("vlm_invoked"):
-                self._record_event(
-                    sim_time=t_sim,
-                    event_type="VLM_INVOCATION",
-                    reason=entry.get("trigger_reason", "Event triggered"),
-                    diagnosis=entry.get("diagnosis", ""),
-                )
-            elif entry and entry.get("trigger_reason") and "transition" in entry.get("trigger_reason", "").lower():
-                self._record_event(
-                    sim_time=t_sim,
-                    event_type="PHASE_TRANSITION",
-                    reason=entry.get("trigger_reason"),
-                    diagnosis=entry.get("diagnosis", ""),
-                )
+                # 1. System 2 Cognitive Cycle (2 Hz or event-driven)
+                entry = self.navigator.step_cognitive_cycle(t_sim)
+                if entry and entry.get("vlm_invoked"):
+                    self._record_event(
+                        sim_time=t_sim,
+                        event_type="VLM_INVOCATION",
+                        reason=entry.get("trigger_reason", "Event triggered"),
+                        diagnosis=entry.get("diagnosis", ""),
+                    )
+                elif entry and entry.get("trigger_reason") and "transition" in entry.get("trigger_reason", "").lower():
+                    self._record_event(
+                        sim_time=t_sim,
+                        event_type="PHASE_TRANSITION",
+                        reason=entry.get("trigger_reason"),
+                        diagnosis=entry.get("diagnosis", ""),
+                    )
 
-            # 2. Chaos Disturbance Injection
-            if self.chaos_mode:
-                self.navigator.apply_chaos(t_sim)
+                # 2. Chaos Disturbance Injection
+                if self.chaos_mode:
+                    self.navigator.apply_chaos(t_sim)
 
-            # 3. System 1 Reflex Cycle (500 Hz MuJoCo Step with Smoothing Filter)
-            self.sim.step_simulation(current_time=time.time())
+                # 3. System 1 Reflex Cycle (500 Hz MuJoCo Step with Smoothing Filter)
+                self.sim.step_simulation(current_time=time.time())
 
-            # 4. Check for Mission Completion
-            if self.navigator.mission_complete and (t_sim - self.navigator.last_s2_time > 1.0):
-                with self._lock:
-                    self.mission_status = "completed"
-                    self.is_running = False
-                self._record_event(
-                    sim_time=t_sim,
-                    event_type="MISSION_SUCCESS",
-                    reason=f"Target '{self.target_mission.upper()}' reached successfully!",
-                    diagnosis="Station-keeping precision hold confirmed.",
-                )
-                break
+                # 4. Check for Mission Completion
+                if self.navigator.mission_complete and (t_sim - self.navigator.last_s2_time > 1.0):
+                    with self._lock:
+                        self.mission_status = "completed"
+                        self.is_running = False
+                    self._record_event(
+                        sim_time=t_sim,
+                        event_type="MISSION_SUCCESS",
+                        reason=f"Target '{self.target_mission.upper()}' reached successfully!",
+                        diagnosis="Station-keeping precision hold confirmed.",
+                    )
+                    break
 
-            # 5. Capture Telemetry Snapshot (Throttled to ~30 Hz sampling)
-            if len(self.telemetry_history) == 0 or (t_sim - self.telemetry_history[-1]["time"]) >= 0.033:
-                snap = self.get_telemetry_snapshot()
-                with self._lock:
-                    self.telemetry_history.append(snap)
-                    self.latest_telemetry = snap
+                # 5. Capture Telemetry Snapshot (Throttled to ~30 Hz sampling)
+                if len(self.telemetry_history) == 0 or (t_sim - self.telemetry_history[-1]["time"]) >= 0.033:
+                    snap = self.get_telemetry_snapshot()
+                    with self._lock:
+                        self.telemetry_history.append(snap)
+                        self.latest_telemetry = snap
 
-            # 6. Real-Time Execution Throttling
-            # Ensures 500 physics cycles per simulated second run at 1x real-time rate
-            target_wall_elapsed = float(self.sim.data.time) - sim_start_t
-            actual_wall_elapsed = time.time() - wall_start
-            sleep_needed = target_wall_elapsed - actual_wall_elapsed
-            if sleep_needed > 0.001:
-                time.sleep(sleep_needed)
+                # 6. Real-Time Execution Throttling
+                # Ensures 500 physics cycles per simulated second run at 1x real-time rate
+                target_wall_elapsed = float(self.sim.data.time) - sim_start_t
+                actual_wall_elapsed = time.time() - wall_start
+                sleep_needed = target_wall_elapsed - actual_wall_elapsed
+                if sleep_needed > 0.001:
+                    time.sleep(sleep_needed)
+        finally:
+            # Ensure any OpenGL context created on this thread is safely freed before the thread terminates
+            try:
+                self.navigator.close()
+            except Exception:
+                pass
 
     def _record_event(self, sim_time: float, event_type: str, reason: str, diagnosis: str) -> None:
         """Records an event in the sliding-window log for dashboard rendering."""
@@ -580,8 +591,30 @@ class NavigationSimulationCoordinator:
         """Releases renderer and worker pool resources."""
         self.shutdown_event.set()
         self.is_running = False
+        if self._sim_thread and self._sim_thread.is_alive() and threading.current_thread() != self._sim_thread:
+            try:
+                self._sim_thread.join(timeout=1.0)
+            except Exception:
+                pass
+
+        def _do_close():
+            with self._lock:
+                if self._renderer is not None:
+                    try:
+                        self._renderer.close()
+                    except Exception:
+                        pass
+                    self._renderer = None
+                    self._render_data = None
+                    self._hud = None
+
         try:
-            self._render_pool.shutdown(wait=False)
+            fut = self._render_pool.submit(_do_close)
+            fut.result(timeout=1.0)
+        except Exception:
+            pass
+        try:
+            self._render_pool.shutdown(wait=True)
         except Exception:
             pass
 
