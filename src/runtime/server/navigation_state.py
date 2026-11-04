@@ -89,6 +89,7 @@ class NavigationSimulationCoordinator:
 
         with self._singleton_lock:
             self._lock = threading.RLock()
+            self.sim_lock = threading.RLock()  # Synchronizes physics steps, resets, and viewer.sync
             self.shutdown_event = threading.Event()
 
             # Single Drone Simulator and Navigator instances
@@ -211,11 +212,12 @@ class NavigationSimulationCoordinator:
             self.chaos_mode = chaos if chaos in ("wind", "motor", "noise") else None
 
             # Reset simulator physics & drone pose
-            self.sim.reset_simulation()
-            self.sim.data.time = 0.0
-            self.sim.data.qpos[0:3] = [0.0, 0.0, 0.8]
-            self.sim.data.qvel[:] = 0.0
-            mujoco.mj_forward(self.sim.model, self.sim.data)
+            with self.sim_lock:
+                self.sim.reset_simulation()
+                self.sim.data.time = 0.0
+                self.sim.data.qpos[0:3] = [0.0, 0.0, 0.8]
+                self.sim.data.qvel[:] = 0.0
+                mujoco.mj_forward(self.sim.model, self.sim.data)
 
             # Close old navigator renderer
             try:
@@ -286,11 +288,12 @@ class NavigationSimulationCoordinator:
         """Resets the drone back to origin pad and halts movement."""
         with self._lock:
             self.stop_mission(status="idle")
-            self.sim.reset_simulation()
-            self.sim.data.time = 0.0
-            self.sim.data.qpos[0:3] = [0.0, 0.0, 0.8]
-            self.sim.data.qvel[:] = 0.0
-            mujoco.mj_forward(self.sim.model, self.sim.data)
+            with self.sim_lock:
+                self.sim.reset_simulation()
+                self.sim.data.time = 0.0
+                self.sim.data.qpos[0:3] = [0.0, 0.0, 0.8]
+                self.sim.data.qvel[:] = 0.0
+                mujoco.mj_forward(self.sim.model, self.sim.data)
             self.navigator.phase = "PHASE_0_LIFTOFF"
             self.navigator.mission_complete = False
             self.telemetry_history.clear()
@@ -374,7 +377,8 @@ class NavigationSimulationCoordinator:
                     self.navigator.apply_chaos(t_sim)
 
                 # 3. System 1 Reflex Cycle (500 Hz MuJoCo Step with Smoothing Filter)
-                self.sim.step_simulation(current_time=time.time())
+                with self.sim_lock:
+                    self.sim.step_simulation(current_time=time.time())
 
                 # 4. Check for Mission Completion (Continues holding in air, does not stop simulation)
                 if self.navigator.mission_complete:
@@ -427,10 +431,13 @@ class NavigationSimulationCoordinator:
 
     def get_telemetry_snapshot(self) -> Dict[str, Any]:
         """Gathers comprehensive sensory, controller, and performance metrics."""
-        pos = self.sim.data.qpos[0:3].copy()
-        vel = self.sim.data.qvel[0:3].copy()
-        quat = self.sim.data.qpos[3:7].copy()
-        omega = self.sim.data.sensordata[0:3].copy()
+        with self.sim_lock:
+            pos = self.sim.data.qpos[0:3].copy()
+            vel = self.sim.data.qvel[0:3].copy()
+            quat = self.sim.data.qpos[3:7].copy()
+            omega = self.sim.data.sensordata[0:3].copy()
+            motor_ctrl = [float(round(m, 2)) for m in self.sim.data.ctrl[:4]]
+            sim_time_val = float(round(self.sim.data.time, 2))
 
         # Euler angles from quaternion [w, x, y, z]
         w, qx, qy, qz = quat
@@ -443,9 +450,6 @@ class NavigationSimulationCoordinator:
         sigma_f = self.sim.controller.l1_state.force_disturbance_estimate
         sigma_f_mujoco = self.sim.controller._T @ sigma_f
         force_norm = float(np.linalg.norm(sigma_f_mujoco))
-
-        # Motor commands
-        motor_ctrl = [float(round(m, 2)) for m in self.sim.data.ctrl[:4]]
 
         # Target setpoint & smoothed reference
         smoothed_target = getattr(self.sim.controller, "smoothed_target_pos", self.sim.controller.target_pos)
@@ -482,7 +486,7 @@ class NavigationSimulationCoordinator:
                 diagnosis_str = active_patch.diagnosis
 
         return {
-            "time": float(round(self.sim.data.time, 2)),
+            "time": sim_time_val,
             "mission": self.target_mission,
             "status": self.mission_status,
             "is_running": self.is_running,
@@ -545,8 +549,9 @@ class NavigationSimulationCoordinator:
             if self._render_data is None:
                 self._render_data = mujoco.MjData(self.sim.model)
 
-            np.copyto(self._render_data.qpos, self.sim.data.qpos)
-            np.copyto(self._render_data.qvel, self.sim.data.qvel)
+            with self.sim_lock:
+                np.copyto(self._render_data.qpos, self.sim.data.qpos)
+                np.copyto(self._render_data.qvel, self.sim.data.qvel)
             mujoco.mj_forward(self.sim.model, self._render_data)
 
             self._renderer.update_scene(self._render_data, camera="fpv")

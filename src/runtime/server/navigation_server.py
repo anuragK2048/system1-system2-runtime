@@ -371,15 +371,12 @@ def create_navigation_app() -> FastAPI:
 
     @app.post("/api/sim/toggle_native_hud")
     def toggle_native_hud_endpoint():
-        """Toggles geometric HUD overlays rendered inside the native MuJoCo passive viewer."""
-        from runtime.sim.native_hud_overlay import native_3d_hud
-        is_on = native_3d_hud.toggle()
-        return {"native_hud_enabled": is_on}
+        """Native 3D HUD overlay disabled per user request (pure native MuJoCo view)."""
+        return {"native_hud_enabled": False}
 
     @app.get("/api/status")
     def status_endpoint():
         """Health and coordinator status endpoint."""
-        from runtime.sim.native_hud_overlay import native_3d_hud
         return {
             "status": "online",
             "simulator": "DroneSimulator (Single Drone Arena)",
@@ -391,7 +388,7 @@ def create_navigation_app() -> FastAPI:
             "use_vlm": nav_coordinator.use_vlm,
             "vlm_model": nav_coordinator.vlm_model,
             "chaos_mode": nav_coordinator.chaos_mode,
-            "native_hud_enabled": native_3d_hud.enabled,
+            "native_hud_enabled": False,
         }
 
     return app
@@ -435,7 +432,7 @@ def main():
     print(f"📡 WebSocket:      ws://localhost:{args.port}/ws/telemetry")
     if args.gui:
         print(f"🖥️ Parallel 3D:    Native MuJoCo OpenGL 60 FPS Viewport Active")
-        print(f"   • Press 'H' in 3D window to toggle geometric HUD overlays")
+        print(f"   • Auto-tracking quadrotor chase camera")
         print(f"   • Press '[' or ']' in 3D window to switch camera perspectives")
     print("═" * 78 + "\n")
 
@@ -451,7 +448,6 @@ def main():
     try:
         if args.gui:
             import mujoco.viewer
-            from runtime.sim.native_hud_overlay import native_3d_hud
 
             # Run uvicorn on daemon thread, MuJoCo Cocoa/GLFW window on macOS main thread
             server_thread = threading.Thread(target=server.run, daemon=True, name="UvicornServerThread")
@@ -461,7 +457,6 @@ def main():
                 with mujoco.viewer.launch_passive(
                     nav_coordinator.sim.model,
                     nav_coordinator.sim.data,
-                    key_callback=native_3d_hud.handle_key,
                 ) as viewer:
                     viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
                     viewer.cam.trackbodyid = nav_coordinator.sim.drone_body_id
@@ -469,9 +464,10 @@ def main():
                     viewer.cam.elevation = -18.0
 
                     while viewer.is_running() and not nav_coordinator.shutdown_event.is_set():
-                        with viewer.lock():
-                            native_3d_hud.render(viewer.user_scn, nav_coordinator.sim, nav_coordinator)
-                        viewer.sync()
+                        # Synchronize with physics step loop so viewer.sync never copies mid-step
+                        with nav_coordinator.sim_lock:
+                            with viewer.lock():
+                                viewer.sync()
                         time.sleep(1.0 / 60.0)
             except RuntimeError as gui_err:
                 print(f"\n⚠️  [GUI LAUNCH ERROR] {gui_err}")

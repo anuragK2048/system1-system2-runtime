@@ -44,6 +44,7 @@ import json
 import math
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
@@ -180,10 +181,11 @@ class AutonomousTargetNavigator:
             self._vlm_pool = None
 
         if self._renderer is not None and getattr(self, "_owns_renderer", True):
-            try:
-                self._renderer.close()
-            except Exception:
-                pass
+            if threading.current_thread() == threading.main_thread():
+                try:
+                    self._renderer.close()
+                except Exception:
+                    pass
             self._renderer = None
 
     def retarget(self, target: str) -> None:
@@ -450,6 +452,66 @@ class AutonomousTargetNavigator:
 
         return False, "Nominal flight within tolerance; reflexive hold active"
 
+    def _camera_forward_waypoint(
+        self,
+        current_pos: np.ndarray,
+        current_yaw_deg: float,
+        dest_xyz: List[float],
+        nominal_yaw_deg: Optional[float] = None,
+        max_velocity: float = 1.0,
+        corridor_width: float = 0.5,
+        target_name: str = "target",
+        fov_lock_deg: float = 15.0,
+    ) -> Tuple[WaypointCommand, str, bool]:
+        """Commands camera-forward flight by rotating in-place until destination is in FPV POV.
+
+        Quadrotor only has forward FPV vision. If heading error to destination exceeds
+        fov_lock_deg (|Δψ| > 15°), the drone holds its current position (X, Y, dest_Z) and
+        rotates on the spot until the target is locked within its camera FOV.
+        Only then does it advance forward along its camera boresight.
+        """
+        cur_x, cur_y, cur_z = float(current_pos[0]), float(current_pos[1]), float(current_pos[2])
+        dest_x, dest_y, dest_z = float(dest_xyz[0]), float(dest_xyz[1]), float(dest_xyz[2])
+
+        dx = dest_x - cur_x
+        dy = dest_y - cur_y
+        dist_xy = math.hypot(dx, dy)
+
+        if dist_xy > 0.35:
+            desired_yaw_deg = math.degrees(math.atan2(dy, dx))
+        else:
+            desired_yaw_deg = nominal_yaw_deg if nominal_yaw_deg is not None else current_yaw_deg
+
+        # Normalized yaw error in [-180, 180]
+        yaw_err = (desired_yaw_deg - current_yaw_deg + 180.0) % 360.0 - 180.0
+        abs_yaw_err = abs(yaw_err)
+
+        if dist_xy > 0.35 and abs_yaw_err > fov_lock_deg:
+            diag = (
+                f"Visual Lock: Rotating in-place to {desired_yaw_deg:.0f}° "
+                f"to acquire {target_name} in FPV POV (Δψ={abs_yaw_err:.0f}°)"
+            )
+            cmd = WaypointCommand(
+                mode="world",
+                target=[cur_x, cur_y, dest_z],
+                yaw_deg=desired_yaw_deg,
+                max_velocity=0.3,
+                corridor_width=0.3,
+            )
+            return cmd, diag, False
+
+        diag = (
+            f"FPV Locked ({desired_yaw_deg:.0f}°): Advancing forward to {target_name}"
+        )
+        cmd = WaypointCommand(
+            mode="world",
+            target=[dest_x, dest_y, dest_z],
+            yaw_deg=desired_yaw_deg,
+            max_velocity=max_velocity,
+            corridor_width=corridor_width,
+        )
+        return cmd, diag, True
+
     def _visual_inertial_reasoner(self, telemetry: dict, sim_time: float) -> System2Patch:
         """Deterministic System 2 reasoner driven strictly by onboard telemetry and visual phase state."""
         alt = telemetry["altitude_m"]
@@ -476,8 +538,9 @@ class AutonomousTargetNavigator:
         diagnosis = ""
 
         # Current estimated position in arena
-        pos_x = float(self.sim.data.qpos[0])
-        pos_y = float(self.sim.data.qpos[1])
+        pos = np.array(self.sim.data.qpos[0:3])
+        pos_x = float(pos[0])
+        pos_y = float(pos[1])
 
         # ----------------------------------------------------------------------
         # UNIVERSAL INTER-SECTOR RETURN PHASES (Collision-Free Arena Hub Transit)
@@ -498,34 +561,46 @@ class AutonomousTargetNavigator:
                     wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
                     self.mission_complete = True
             else:
-                diagnosis = "Returning along runway centerline to Arena Hub (X=0.0m)"
-                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.10], yaw_deg=0.0, max_velocity=1.3, corridor_width=0.6)
+                wc, diagnosis, _ = self._camera_forward_waypoint(
+                    pos, yaw, [0.0, 0.0, 1.10], nominal_yaw_deg=180.0, max_velocity=1.2, corridor_width=0.6, target_name="Arena Hub"
+                )
 
         elif self.phase == "PHASE_WINDOW_RETURN_HUB":
             if pos_y >= 4.2:
-                diagnosis = "Traversing back through Left Window aperture to arena side"
-                wc = WaypointCommand(mode="world", target=[0.0, 3.2, 1.10], yaw_deg=90.0, max_velocity=0.6, corridor_width=0.4)
-                max_tilt = 12.0
+                # Egress side: rotate in-place to face back inside (-90°), then traverse window opening
+                wc, diagnosis, is_locked = self._camera_forward_waypoint(
+                    pos, yaw, [0.0, 3.2, 1.10], nominal_yaw_deg=-90.0, max_velocity=0.6, corridor_width=0.4, target_name="Window Aperture Ingress"
+                )
+                if is_locked:
+                    max_tilt = 12.0
             elif pos_y > 0.6:
-                diagnosis = "Gliding from window approach corridor to Arena Hub"
-                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0, max_velocity=1.0)
+                wc, diagnosis, _ = self._camera_forward_waypoint(
+                    pos, yaw, [0.0, 0.0, 1.0], nominal_yaw_deg=-90.0, max_velocity=1.0, corridor_width=0.5, target_name="Arena Hub"
+                )
             else:
                 self.phase = "PHASE_2_CORRIDOR_APPROACH"
                 diagnosis = f"Arena Hub reached -> Advancing toward target '{self.target_mission.upper()}'"
-                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
+                wc, _, _ = self._camera_forward_waypoint(
+                    pos, yaw, [0.0, 0.0, 1.0], nominal_yaw_deg=0.0, max_velocity=0.6, target_name=self.target_mission.upper()
+                )
 
         elif self.phase == "PHASE_ARCH_RETURN_HUB":
             if pos_y <= -4.2:
-                diagnosis = "Traversing back through Right Arch aperture to arena side"
-                wc = WaypointCommand(mode="world", target=[0.0, -3.2, 0.90], yaw_deg=-90.0, max_velocity=0.6, corridor_width=0.4)
-                max_tilt = 12.0
+                wc, diagnosis, is_locked = self._camera_forward_waypoint(
+                    pos, yaw, [0.0, -3.2, 0.90], nominal_yaw_deg=90.0, max_velocity=0.6, corridor_width=0.4, target_name="Arch Aperture Ingress"
+                )
+                if is_locked:
+                    max_tilt = 12.0
             elif pos_y < -0.6:
-                diagnosis = "Gliding from arch approach corridor to Arena Hub"
-                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0, max_velocity=1.0)
+                wc, diagnosis, _ = self._camera_forward_waypoint(
+                    pos, yaw, [0.0, 0.0, 1.0], nominal_yaw_deg=90.0, max_velocity=1.0, corridor_width=0.5, target_name="Arena Hub"
+                )
             else:
                 self.phase = "PHASE_2_CORRIDOR_APPROACH"
                 diagnosis = f"Arena Hub reached -> Advancing toward target '{self.target_mission.upper()}'"
-                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
+                wc, _, _ = self._camera_forward_waypoint(
+                    pos, yaw, [0.0, 0.0, 1.0], nominal_yaw_deg=0.0, max_velocity=0.6, target_name=self.target_mission.upper()
+                )
 
         # ----------------------------------------------------------------------
         # MISSION 1: TARGET PAD ALPHA (Runway Forward Corridor)
@@ -540,22 +615,21 @@ class AutonomousTargetNavigator:
                     wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
 
             if self.phase == "PHASE_2_CORRIDOR_APPROACH":
-                if pos_x < 2.5:
-                    diagnosis = "Advancing through hazard pylons along runway corridor (Leg 1)"
-                    wc = WaypointCommand(mode="world", target=[2.8, 0.0, 1.0], yaw_deg=0.0, max_velocity=1.2, corridor_width=0.6)
-                elif pos_x < 5.0:
-                    diagnosis = "Visually tracking Target Pad Alpha concentric rings (Leg 2)"
-                    wc = WaypointCommand(mode="world", target=[5.5, 0.0, 1.0], yaw_deg=0.0, max_velocity=1.0, corridor_width=0.6)
+                if pos_x < 5.0:
+                    wc, diagnosis, _ = self._camera_forward_waypoint(
+                        pos, yaw, [5.5, 0.0, 1.0], nominal_yaw_deg=0.0, max_velocity=1.2, corridor_width=0.6, target_name="Pad Alpha"
+                    )
                 elif pos_x > 5.9:
-                    diagnosis = "Navigating reverse from Platform Delta to Target Pad Alpha"
-                    wc = WaypointCommand(mode="world", target=[5.5, 0.0, 1.0], yaw_deg=0.0, max_velocity=1.0, corridor_width=0.6)
+                    wc, diagnosis, _ = self._camera_forward_waypoint(
+                        pos, yaw, [5.5, 0.0, 1.0], nominal_yaw_deg=180.0, max_velocity=1.0, corridor_width=0.6, target_name="Pad Alpha"
+                    )
                 else:
                     self.phase = "PHASE_4_PRECISION_HOVER"
                     print("🎯 [PHASE TRANSITION] Pad Alpha visually acquired -> PHASE_4_PRECISION_HOVER")
 
             if self.phase == "PHASE_4_PRECISION_HOVER":
                 diagnosis = "Station-keeping precision hover centered over Target Pad Alpha"
-                wc = WaypointCommand(mode="world", target=[5.5, 0.0, 1.0], yaw_deg=0.0, max_velocity=0.4)
+                wc = WaypointCommand(mode="world", target=[5.5, 0.0, 1.0], yaw_deg=yaw, max_velocity=0.4)
                 if abs(pos_x - 5.5) < 0.20 and abs(pos_y) < 0.20:
                     self.mission_complete = True
 
@@ -572,19 +646,17 @@ class AutonomousTargetNavigator:
                     wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
 
             if self.phase == "PHASE_2_CORRIDOR_APPROACH":
-                if pos_x < 3.5:
-                    diagnosis = "Advancing past hazard pylons (Leg 1)"
-                    wc = WaypointCommand(mode="world", target=[4.0, 0.0, 1.0], yaw_deg=0.0, max_velocity=1.4)
-                elif pos_x < 7.2:
-                    diagnosis = "Overflying Pad Alpha toward Elevated Platform Delta (Leg 2)"
-                    wc = WaypointCommand(mode="world", target=[8.0, 0.0, 1.10], yaw_deg=0.0, max_velocity=1.2)
+                if pos_x < 7.4:
+                    wc, diagnosis, _ = self._camera_forward_waypoint(
+                        pos, yaw, [8.0, 0.0, 1.10], nominal_yaw_deg=0.0, max_velocity=1.3, corridor_width=0.6, target_name="Platform Delta"
+                    )
                 else:
                     self.phase = "PHASE_4_PRECISION_HOVER"
                     print("🎯 [PHASE TRANSITION] Platform Delta acquired -> PHASE_4_PRECISION_HOVER")
 
             if self.phase == "PHASE_4_PRECISION_HOVER":
                 diagnosis = "Precision elevated hover over Platform Delta (Z=1.10m)"
-                wc = WaypointCommand(mode="world", target=[8.0, 0.0, 1.10], yaw_deg=0.0, max_velocity=0.4)
+                wc = WaypointCommand(mode="world", target=[8.0, 0.0, 1.10], yaw_deg=yaw, max_velocity=0.4)
                 if abs(pos_x - 8.0) < 0.25 and abs(pos_y) < 0.20:
                     self.mission_complete = True
 
@@ -601,20 +673,21 @@ class AutonomousTargetNavigator:
                     wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.10], yaw_deg=0.0)
 
             if self.phase == "PHASE_1_SECTOR_SCAN":
-                if abs(yaw - 90.0) < 6.0:
+                wc, diagnosis, is_locked = self._camera_forward_waypoint(
+                    pos, yaw, [0.0, 3.8, 1.10], nominal_yaw_deg=90.0, max_velocity=0.6, target_name="Left Window Aperture"
+                )
+                if is_locked or abs(yaw - 90.0) < 8.0:
                     self.phase = "PHASE_2_CORRIDOR_APPROACH"
                     print("✅ [TARGET ACQUIRED] Left Window framed in HUD -> PHASE_2_CORRIDOR_APPROACH")
-                else:
-                    diagnosis = "Active saccade: in-place yaw rotation +90° to visually acquire Left Window"
-                    wc = WaypointCommand(mode="world", target=[0.0, max(0.0, pos_y), 1.10], yaw_deg=90.0, max_velocity=0.6)
 
             if self.phase == "PHASE_2_CORRIDOR_APPROACH":
                 if pos_y >= 3.5:
                     self.phase = "PHASE_3_APERTURE_INGRESS"
                     print("🚪 [INGRESS ARMED] Traversing inner clearance envelope -> PHASE_3_APERTURE_INGRESS")
                 else:
-                    diagnosis = "Approaching Left Window along HUD approach glidepath vector"
-                    wc = WaypointCommand(mode="world", target=[0.0, 3.8, 1.10], yaw_deg=90.0, max_velocity=0.8, corridor_width=0.5)
+                    wc, diagnosis, _ = self._camera_forward_waypoint(
+                        pos, yaw, [0.0, 3.8, 1.10], nominal_yaw_deg=90.0, max_velocity=0.8, corridor_width=0.5, target_name="Left Window Glidepath"
+                    )
 
             if self.phase == "PHASE_3_APERTURE_INGRESS":
                 if pos_y >= 5.3:
@@ -643,21 +716,22 @@ class AutonomousTargetNavigator:
                     wc = WaypointCommand(mode="world", target=[0.0, 0.0, 0.90], yaw_deg=0.0)
 
             if self.phase == "PHASE_1_SECTOR_SCAN":
-                yaw_err = min(abs(yaw - (-90.0)), abs(yaw - 270.0))
-                if yaw_err < 6.0:
+                wc, diagnosis, is_locked = self._camera_forward_waypoint(
+                    pos, yaw, [0.0, -3.8, 0.90], nominal_yaw_deg=-90.0, max_velocity=0.6, target_name="Right Arch Aperture"
+                )
+                yaw_err_arch = min(abs(yaw - (-90.0)), abs(yaw - 270.0))
+                if is_locked or yaw_err_arch < 8.0:
                     self.phase = "PHASE_2_CORRIDOR_APPROACH"
                     print("✅ [TARGET ACQUIRED] Right Arch framed in HUD -> PHASE_2_CORRIDOR_APPROACH")
-                else:
-                    diagnosis = "Active saccade: in-place yaw rotation -90° to visually acquire Right Arch"
-                    wc = WaypointCommand(mode="world", target=[0.0, min(0.0, pos_y), 0.90], yaw_deg=-90.0, max_velocity=0.6)
 
             if self.phase == "PHASE_2_CORRIDOR_APPROACH":
                 if pos_y <= -3.5:
                     self.phase = "PHASE_3_APERTURE_INGRESS"
                     print("⛩️ [INGRESS ARMED] Traversing arch inner envelope -> PHASE_3_APERTURE_INGRESS")
                 else:
-                    diagnosis = "Approaching Right Arch along HUD approach glidepath vector"
-                    wc = WaypointCommand(mode="world", target=[0.0, -3.8, 0.90], yaw_deg=-90.0, max_velocity=0.8, corridor_width=0.5)
+                    wc, diagnosis, _ = self._camera_forward_waypoint(
+                        pos, yaw, [0.0, -3.8, 0.90], nominal_yaw_deg=-90.0, max_velocity=0.8, corridor_width=0.5, target_name="Right Arch Glidepath"
+                    )
 
             if self.phase == "PHASE_3_APERTURE_INGRESS":
                 if pos_y <= -5.3:
@@ -686,19 +760,17 @@ class AutonomousTargetNavigator:
                     wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
 
             if self.phase == "PHASE_2_CORRIDOR_APPROACH":
-                if pos_x > 4.0:
-                    diagnosis = "Navigating reverse from runway to entrance gate poles"
-                    wc = WaypointCommand(mode="world", target=[3.5, 0.0, 1.0], yaw_deg=0.0, max_velocity=1.0, corridor_width=0.5)
-                elif pos_x < 3.2:
-                    diagnosis = "Advancing to runway pylon entrance corridor"
-                    wc = WaypointCommand(mode="world", target=[3.5, 0.0, 1.0], yaw_deg=0.0, max_velocity=1.0, corridor_width=0.5)
-                else:
+                if abs(pos_x - 3.5) < 0.25 and abs(pos_y) < 0.25:
                     self.phase = "PHASE_4_PRECISION_HOVER"
                     print("🎯 [PHASE TRANSITION] Runway poles reached -> PHASE_4_PRECISION_HOVER")
+                else:
+                    wc, diagnosis, _ = self._camera_forward_waypoint(
+                        pos, yaw, [3.5, 0.0, 1.0], nominal_yaw_deg=0.0 if pos_x < 3.5 else 180.0, max_velocity=1.0, corridor_width=0.5, target_name="Runway Poles"
+                    )
 
             if self.phase == "PHASE_4_PRECISION_HOVER":
                 diagnosis = "Holding precision station-keeping hover centered between runway poles (Y=±0.9m)"
-                wc = WaypointCommand(mode="world", target=[3.5, 0.0, 1.0], yaw_deg=0.0, max_velocity=0.4, corridor_width=0.4)
+                wc = WaypointCommand(mode="world", target=[3.5, 0.0, 1.0], yaw_deg=yaw, max_velocity=0.4, corridor_width=0.4)
                 if abs(pos_x - 3.5) < 0.20 and abs(pos_y) < 0.20:
                     self.mission_complete = True
 
@@ -709,11 +781,12 @@ class AutonomousTargetNavigator:
             if abs(pos_x) < 0.20 and abs(pos_y) < 0.20:
                 self.phase = "PHASE_4_PRECISION_HOVER"
                 diagnosis = "Station-keeping precision hover over Origin Pad [0, 0, 1.0]"
-                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0, max_velocity=0.4)
+                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=yaw, max_velocity=0.4)
                 self.mission_complete = True
             else:
-                diagnosis = "Returning along runway corridor to Origin Pad [0, 0, 1.0]"
-                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0, max_velocity=1.2, corridor_width=0.5)
+                wc, diagnosis, _ = self._camera_forward_waypoint(
+                    pos, yaw, [0.0, 0.0, 1.0], nominal_yaw_deg=180.0, max_velocity=1.2, corridor_width=0.5, target_name="Origin Pad"
+                )
 
         else:
             raise ValueError(f"Unknown target mission: {self.target_mission}")
