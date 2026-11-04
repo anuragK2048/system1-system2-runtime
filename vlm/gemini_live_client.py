@@ -20,10 +20,11 @@ import time
 import json
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-DEFAULT_GEMINI_KEY = "YOUR_GEMINI_API_KEY"
+load_dotenv()
 
 LIVE_SYSTEM_PROMPT = """You are the System 2 Multimodal Flight Reasoner for an autonomous Skydio X2 quadrotor.
 CRITICAL INSTRUCTION: Analyze the onboard FPV camera frame (with HUD overlay) and telemetry. You MUST immediately execute emit_flight_patch with your decision. Keep diagnosis under 20 words.
@@ -189,7 +190,11 @@ async def query_gemini_live_async(
         (flight_patch_dict, latency_dict)
         where latency_dict = {"handshake": s, "inference": s, "total": s}
     """
-    key = api_key or os.getenv("GEMINI_API_KEY", DEFAULT_GEMINI_KEY)
+    key = api_key or os.getenv("GEMINI_API_KEY")
+    if not key:
+        raise ValueError(
+            "GEMINI_API_KEY not found. Please ensure GEMINI_API_KEY is set in your .env file or environment."
+        )
     client = genai.Client(api_key=key)
 
     # For extended thinking, tool behavior must be NON_BLOCKING

@@ -24,6 +24,9 @@ import argparse
 from pathlib import Path
 from typing import Dict, Any, Tuple, List
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 JSON_PATH = Path("vlm/test_cases.json")
 
@@ -77,7 +80,9 @@ def encode_image_base64(path: Path) -> str:
 
 
 def query_gemini(image_path: Path, prompt_text: str, model="gemini-3.5-flash-lite") -> Tuple[str, float]:
-    key = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY")
+    key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        raise ValueError("GEMINI_API_KEY not found in environment or .env file.")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
     b64_img = encode_image_base64(image_path)
     payload = {

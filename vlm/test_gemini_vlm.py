@@ -13,9 +13,14 @@ import json
 import base64
 from pathlib import Path
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 IMAGE_PATH = Path("vlm/sample_fpv.jpg")
-API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY")
+API_KEY = os.getenv("GEMINI_API_KEY")
+if not API_KEY:
+    raise ValueError("GEMINI_API_KEY not found in environment or .env file.")
 MODEL = "gemini-3.5-flash-lite"
 
 SYSTEM_PROMPT = """You are the System 2 Multimodal Flight Reasoner for a Skydio X2 quadrotor.

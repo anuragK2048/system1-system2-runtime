@@ -30,9 +30,11 @@ from pathlib import Path
 from typing import Dict, Any, Tuple, List, Optional
 import requests
 import numpy as np
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DEFAULT_TEST_FILE = Path("vlm/test_cases_single.json")
-DEFAULT_GEMINI_KEY = "YOUR_GEMINI_API_KEY"
 
 from runtime.brain.prompts import MULTIMODAL_SYSTEM_PROMPT as SYSTEM_PROMPT
 
@@ -47,7 +49,9 @@ def query_gemini(
     image_path: Path, prompt_text: str, model: str = "gemini-3.5-flash-lite"
 ) -> Tuple[str, float]:
     """Queries Google Gemini multimodal API with an onboard FPV frame."""
-    api_key = os.getenv("GEMINI_API_KEY", DEFAULT_GEMINI_KEY)
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY not found in environment or .env file.")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     b64_img = encode_image_base64(image_path)
     payload = {

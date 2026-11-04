@@ -60,8 +60,9 @@ from runtime.sim.simulator import DroneSimulator
 from runtime.schemas.tier2 import System2Patch, WaypointCommand, SafetyEnvelope, GainMultipliers
 from runtime.brain.prompts import MULTIMODAL_SYSTEM_PROMPT
 from vlm.hud_overlay import HUDProjector, Aperture3D
+from dotenv import load_dotenv
 
-DEFAULT_GEMINI_KEY = "YOUR_GEMINI_API_KEY"
+load_dotenv()
 
 ARENA_APERTURES = [
     Aperture3D(
@@ -212,7 +213,10 @@ class AutonomousTargetNavigator:
         """Queries Google Gemini multimodal API with live FPV image and telemetry."""
         import requests
 
-        api_key = os.getenv("GEMINI_API_KEY", DEFAULT_GEMINI_KEY)
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            print("   ⚠️ [VLM ERROR] GEMINI_API_KEY not configured in .env or environment")
+            return None
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.vlm_model}:generateContent?key={api_key}"
 
         with open(img_path, "rb") as f:

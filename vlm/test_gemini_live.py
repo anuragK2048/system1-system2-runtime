@@ -46,8 +46,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from vlm.gemini_live_client import (
-    DEFAULT_GEMINI_KEY,
     LIVE_SYSTEM_PROMPT,
     LIVE_TOOL_DECLARATION,
     convert_tool_args_to_flight_patch,
@@ -191,7 +194,11 @@ def run_live_benchmark(
     with open(test_file) as f:
         tcs = json.load(f)
 
-    api_key = os.getenv("GEMINI_API_KEY", DEFAULT_GEMINI_KEY)
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "GEMINI_API_KEY not found. Please ensure GEMINI_API_KEY is set in your .env file or environment."
+        )
     client = genai.Client(api_key=api_key)
 
     print("\n" + "═" * 84)
