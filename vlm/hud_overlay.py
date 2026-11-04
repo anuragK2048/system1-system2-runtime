@@ -273,6 +273,9 @@ class HUDProjector:
         if cam_id < 0:
             raise ValueError(f"Camera '{self.camera_name}' not found in MuJoCo model.")
 
+        if np.linalg.norm(data.cam_xmat[cam_id]) < 1e-3:
+            mujoco.mj_forward(model, data)
+
         pos = data.cam_xpos[cam_id].copy()
         mat = data.cam_xmat[cam_id].reshape(3, 3)
 
@@ -284,10 +287,13 @@ class HUDProjector:
         up = mat[:, 1].copy()
         forward = -mat[:, 2].copy()
 
-        # Normalize to safeguard against floating precision drift
-        forward /= np.linalg.norm(forward)
-        up /= np.linalg.norm(up)
-        right /= np.linalg.norm(right)
+        # Normalize with zero-division safeguard
+        f_norm = float(np.linalg.norm(forward))
+        u_norm = float(np.linalg.norm(up))
+        r_norm = float(np.linalg.norm(right))
+        forward = forward / f_norm if f_norm > 1e-6 else np.array([1.0, 0.0, 0.0])
+        up = up / u_norm if u_norm > 1e-6 else np.array([0.0, 0.0, 1.0])
+        right = right / r_norm if r_norm > 1e-6 else np.array([0.0, -1.0, 0.0])
 
         rpy = self._compute_rpy(forward, up, right)
 
@@ -655,6 +661,8 @@ class HUDProjector:
         c_proj = self.project_point(center_world, cam)
         if c_proj is not None:
             cu, cv, depth = c_proj
+            if not (math.isfinite(cu) and math.isfinite(cv)):
+                return
 
             # Precision Bullseye / Diamond
             d_size = 5

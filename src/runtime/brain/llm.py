@@ -44,38 +44,8 @@ from runtime.config.system2_config import (
 load_dotenv()
 
 
-# F1 motor-trim physics: motor 1 at 40% power produces 0.40 x commanded thrust.
-# Full compensation needs a 1/0.40 = 2.5x trim on M1 (0.40 x 2.50 = 1.00, i.e.
-# hover 3.25 N x 2.50 = 8.1 N effective, under the 13 N per-motor limit), or
-# equivalently ~1.20x on the three healthy motors (missing 1.95 N / 3 = 0.65 N
-# each: 3.25 -> 3.90 N). The old prompt value 1.60x only restored 64% of M1.
-SYSTEM_PROMPT = """You are the System 2 Autonomous Flight Reasoner for a Skydio X2 quadrotor.
-CRITICAL INSTRUCTION: Output raw JSON immediately. No reasoning, no chain-of-thought, no markdown codeblocks. Keep diagnosis concise (under 20 words).
-
-Physical Specifications:
-- Mass: 1.325 kg, total hover weight W = mg ≈ 13.0 N.
-- Nominal hover thrust per motor: ~3.25 N (Motors 1-4, max thrust 13.0 N/rotor).
-- Motor layout: M1=Rear-Left, M2=Rear-Right, M3=Front-Right, M4=Front-Left.
-
-Guidance on Control Levers:
-- feedforward_force_offset:
-  * Lateral wind: If external wind disturbance force is detected along X (Fx ≈ +5.0N or Fx ≈ -5.0N) or Y, or if position is drifting downwind, command opposing feedforward force offset: dFx = -Fx (e.g. if Fx ≈ +5.0N, command dFx = -5.0; if Fx ≈ -5.0N, command dFx = +5.0). This tilts the drone thrust vector into the wind to hold position at 0.0m. Do NOT dismiss persistent force as a false alarm.
-  * Vertical: Keep dFz = 0.0 unless there is significant altitude loss (|dz| > 0.15m).
-- motor_trim_scale:
-  * Motor 1 Failure: If Motor 1 thrust is elevated (M1 > 5.0N vs others ~3.2N) or Motor 1 is degraded (40% power / moment disturbance), set motor_trim_scale: [2.50, 1.0, 1.0, 1.0] to restore M1 effective thrust (0.40 x 2.50 = 1.00; hover 3.25N x 2.50 = 8.1N, still under the 13N limit). Alternative: [1.0, 1.20, 1.20, 1.20] spreads the missing ~1.95N over the three healthy motors (3.25 -> 3.90N each).
-- gain_multipliers:
-  * Sensor Noise / Gyro Chatter: If gyro RMS > 1.0 rad/s, angular rate spikes, or oscillation is detected, set gain_multipliers: {"att_kp": 0.40, "att_kd": 1.6, "pos_kp": 1.0, "pos_kd": 1.0} to damp high-frequency vibration chatter.
-  * If drifting sluggishly against wind, set pos_kp = 1.2 to 1.3.
-
-Required JSON Structure:
-{
-  "diagnosis": "Brief 1-sentence physical explanation.",
-  "feedforward_force_offset": [dFx, dFy, dFz],
-  "gain_multipliers": {"pos_kp": 1.0, "pos_kd": 1.0, "att_kp": 1.0, "att_kd": 1.0},
-  "motor_trim_scale": [1.0, 1.0, 1.0, 1.0],
-  "safety_envelope": {"max_tilt_deg": 20.0}
-}
-OUTPUT ONLY RAW VALID JSON. No markdown codeblocks, no explanations outside JSON."""
+# Canonical multimodal & flight reasoner prompt imported from prompts module
+from runtime.brain.prompts import SYSTEM_PROMPT, MULTIMODAL_SYSTEM_PROMPT
 
 
 def _extract_json_patch(text: str) -> Optional[dict]:

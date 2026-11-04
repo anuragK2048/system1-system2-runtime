@@ -90,6 +90,7 @@ class System2Patch:
     5. waypoint_command: {mode, target, yaw_deg, max_velocity, corridor_width}
     """
     diagnosis: str = "Nominal"
+    flight_phase: Optional[str] = None
     feedforward_force_offset: Optional[List[float]] = None
     gain_multipliers: Optional[GainMultipliers] = None
     motor_trim_scale: Optional[List[float]] = None
@@ -143,6 +144,7 @@ class System2Patch:
 
         patch = cls(
             diagnosis=str(data.get("diagnosis", "")),
+            flight_phase=str(data["flight_phase"]) if data.get("flight_phase") else None,
             feedforward_force_offset=ff,
             gain_multipliers=gains,
             motor_trim_scale=trim,
@@ -156,6 +158,7 @@ class System2Patch:
     def to_dict(self) -> Dict[str, object]:
         return {
             "diagnosis": self.diagnosis,
+            "flight_phase": self.flight_phase,
             "feedforward_force_offset": self.feedforward_force_offset,
             "gain_multipliers": self.gain_multipliers.to_dict() if self.gain_multipliers else None,
             "motor_trim_scale": self.motor_trim_scale,
