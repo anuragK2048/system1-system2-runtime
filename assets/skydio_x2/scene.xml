@@ -4,7 +4,7 @@
   <statistic meansize=".05"/>
 
   <visual>
-    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <headlight diffuse="0.7 0.7 0.7" ambient="0.4 0.4 0.4" specular="0.1 0.1 0.1"/>
     <rgba haze="0.15 0.25 0.35 1"/>
     <global azimuth="-20" elevation="-20" ellipsoidinertia="true"/>
   </visual>
@@ -17,7 +17,42 @@
   </asset>
 
   <worldbody>
-    <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <light pos="0 0 3.0" dir="0 0 -1" directional="true"/>
+    <light pos="6.0 0 4.0" dir="-0.2 0 -1" directional="true"/>
     <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+
+    <!-- Corridor Hazard Pylons (Gate Obstacles framing corridor at x=3.5m, giving 2+ sec System-2 reaction time) -->
+    <geom name="pylon_left" type="cylinder" pos="3.5 0.9 0.4" size="0.09 0.4" rgba="0.9 0.2 0.2 0.95"/>
+    <geom name="pylon_left_band1" type="cylinder" pos="3.5 0.9 0.5" size="0.093 0.06" rgba="1.0 0.85 0.0 1.0" contype="0" conaffinity="0"/>
+    <geom name="pylon_left_band2" type="cylinder" pos="3.5 0.9 0.25" size="0.093 0.06" rgba="1.0 0.85 0.0 1.0" contype="0" conaffinity="0"/>
+
+    <geom name="pylon_right" type="cylinder" pos="3.5 -0.9 0.4" size="0.09 0.4" rgba="0.9 0.2 0.2 0.95"/>
+    <geom name="pylon_right_band1" type="cylinder" pos="3.5 -0.9 0.5" size="0.093 0.06" rgba="1.0 0.85 0.0 1.0" contype="0" conaffinity="0"/>
+    <geom name="pylon_right_band2" type="cylinder" pos="3.5 -0.9 0.25" size="0.093 0.06" rgba="1.0 0.85 0.0 1.0" contype="0" conaffinity="0"/>
+
+    <!-- Target Pad Alpha (Primary Front Landing Pad at x=5.5m: Safety Orange / Amber theme) -->
+    <geom name="pad_alpha_base" type="cylinder" size="0.60 0.002" pos="5.5 0 0.002" rgba="1.0 0.35 0.0 0.85" contype="0" conaffinity="0"/>
+    <geom name="pad_alpha_outer" type="cylinder" size="0.40 0.003" pos="5.5 0 0.003" rgba="1.0 0.85 0.0 0.9" contype="0" conaffinity="0"/>
+    <geom name="pad_alpha_inner" type="cylinder" size="0.20 0.004" pos="5.5 0 0.004" rgba="1.0 0.35 0.0 0.95" contype="0" conaffinity="0"/>
+    <geom name="pad_alpha_bullseye" type="cylinder" size="0.07 0.005" pos="5.5 0 0.005" rgba="1.0 1.0 1.0 1.0" contype="0" conaffinity="0"/>
+
+    <!-- Elevated Station Delta (Raised Hover Pedestal at x=8.0m: height 0.70m, top disc at z=0.70m) -->
+    <geom name="pedestal_delta" type="cylinder" pos="8.0 0 0.35" size="0.45 0.35" rgba="0.22 0.25 0.28 1.0"/>
+    <geom name="pedestal_delta_disc" type="cylinder" pos="8.0 0 0.705" size="0.45 0.005" rgba="1.0 0.9 0.1 0.95" contype="0" conaffinity="0"/>
+    <geom name="pedestal_delta_ring_outer" type="cylinder" pos="8.0 0 0.706" size="0.32 0.0055" rgba="0.15 0.15 0.15 0.95" contype="0" conaffinity="0"/>
+    <geom name="pedestal_delta_ring_inner" type="cylinder" pos="8.0 0 0.707" size="0.18 0.006" rgba="1.0 0.9 0.1 0.95" contype="0" conaffinity="0"/>
+    <geom name="pedestal_delta_center" type="cylinder" pos="8.0 0 0.708" size="0.06 0.0065" rgba="1.0 1.0 1.0 1.0" contype="0" conaffinity="0"/>
+
+    <!-- Target Pad Bravo (Forward Left Waypoint Pad at x=11.0m, y=2.2m: Cyan / Neon Blue theme) -->
+    <geom name="pad_bravo_base" type="cylinder" size="0.60 0.002" pos="11.0 2.2 0.002" rgba="0.0 0.7 0.9 0.85" contype="0" conaffinity="0"/>
+    <geom name="pad_bravo_outer" type="cylinder" size="0.40 0.003" pos="11.0 2.2 0.003" rgba="0.0 0.85 1.0 0.9" contype="0" conaffinity="0"/>
+    <geom name="pad_bravo_inner" type="cylinder" size="0.20 0.004" pos="11.0 2.2 0.004" rgba="0.1 0.45 0.95 0.95" contype="0" conaffinity="0"/>
+    <geom name="pad_bravo_bullseye" type="cylinder" size="0.07 0.005" pos="11.0 2.2 0.005" rgba="1.0 1.0 1.0 1.0" contype="0" conaffinity="0"/>
+
+    <!-- Target Pad Charlie (Forward Right Waypoint Pad at x=11.0m, y=-2.2m: Emerald / Neon Green theme) -->
+    <geom name="pad_charlie_base" type="cylinder" size="0.60 0.002" pos="11.0 -2.2 0.002" rgba="0.0 0.75 0.35 0.85" contype="0" conaffinity="0"/>
+    <geom name="pad_charlie_outer" type="cylinder" size="0.40 0.003" pos="11.0 -2.2 0.003" rgba="0.0 1.0 0.4 0.9" contype="0" conaffinity="0"/>
+    <geom name="pad_charlie_inner" type="cylinder" size="0.20 0.004" pos="11.0 -2.2 0.004" rgba="0.05 0.6 0.25 0.95" contype="0" conaffinity="0"/>
+    <geom name="pad_charlie_bullseye" type="cylinder" size="0.07 0.005" pos="11.0 -2.2 0.005" rgba="1.0 1.0 1.0 1.0" contype="0" conaffinity="0"/>
   </worldbody>
 </mujoco>

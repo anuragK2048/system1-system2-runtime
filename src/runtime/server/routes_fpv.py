@@ -43,6 +43,9 @@ JPEG_QUALITY = 80
 CAMERAS = {
     "drone1": "d1_fpv",
     "drone2": "d2_fpv",
+    "drone": "fpv",
+    "single": "fpv",
+    "fpv": "fpv",
 }
 
 _renderer: Optional[mujoco.Renderer] = None
@@ -185,7 +188,7 @@ async def _frame_generator(camera_name: str, request: Request) -> AsyncIterator[
 @router.get("/stream")
 async def fpv_stream(
     request: Request,
-    drone: str = Query("drone2", pattern="^(drone1|drone2)$"),
+    drone: str = Query("drone2", pattern="^(drone1|drone2|drone|single|fpv)$"),
 ) -> StreamingResponse:
     """MJPEG stream from the selected drone's body-fixed FPV camera."""
     sim = sim_context.sim
@@ -194,12 +197,23 @@ async def fpv_stream(
             status_code=503,
             detail="Simulator is not running; start the viewer or --headless server first.",
         )
-    camera_name = CAMERAS[drone]
+    camera_name = CAMERAS.get(drone, "fpv")
     if mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name) < 0:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Camera '{camera_name}' not found in the loaded MJCF model.",
-        )
+        # Fallback resolution across single and dual drone scene models:
+        # If camera not found by mapped name, try fallback candidates
+        fallback_candidates = [camera_name, "fpv", "d1_fpv", "d2_fpv"]
+        found_name = None
+        for candidate in fallback_candidates:
+            if mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_CAMERA, candidate) >= 0:
+                found_name = candidate
+                break
+        if found_name is not None:
+            camera_name = found_name
+        else:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Camera '{camera_name}' not found in the loaded MJCF model.",
+            )
     return StreamingResponse(
         _frame_generator(camera_name, request),
         media_type="multipart/x-mixed-replace; boundary=frame",

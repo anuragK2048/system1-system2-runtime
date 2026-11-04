@@ -4,6 +4,7 @@ from runtime.schemas.tier2 import (
     GainMultipliers,
     SafetyEnvelope,
     System2Patch,
+    WaypointCommand,
 )
 from runtime.schemas.telemetry import (
     FastTriggerEvent,
@@ -14,6 +15,7 @@ __all__ = [
     "GainMultipliers",
     "SafetyEnvelope",
     "System2Patch",
+    "WaypointCommand",
     "FastTriggerEvent",
     "TelemetrySummary",
 ]

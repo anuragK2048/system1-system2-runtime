@@ -30,7 +30,7 @@ import numpy as np
 
 from runtime.sim.config import DroneConfig, PIDConfig, L1Config
 from runtime.sim.bridge import System1System2Bridge
-from runtime.schemas.tier2 import System2Patch
+from runtime.schemas.tier2 import System2Patch, WaypointCommand
 from runtime.config.system2_config import PatchApplicationConfig
 from runtime.quadlib import (
     Quaternion,
@@ -122,6 +122,8 @@ class System1Controller:
         explicit_ff: Optional[np.ndarray],
         explicit_trim: Optional[np.ndarray],
         target_pos: Optional[np.ndarray],
+        pos: Optional[np.ndarray] = None,
+        quat: Optional[np.ndarray] = None,
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], float, float, float, float, np.ndarray, Optional[float]]:
         """Resolves active patch with hot-swap ramp-in apply time, confidence scaling, and safety clamps."""
         active_patch = self.bridge.get_active_patch()
@@ -177,6 +179,23 @@ class System1Controller:
 
         # Target setpoint in MuJoCo frame
         current_target_pos = (target_pos if target_pos is not None else self.target_pos).copy()
+
+        # Autonomous Waypoint Guidance
+        if active_patch and active_patch.waypoint_command:
+            wc = active_patch.waypoint_command
+            if wc.mode == "relative_body":
+                dx_b, dy_b, dz_b = wc.target
+                yaw = 0.0
+                if quat is not None:
+                    w, qx, qy, qz = quat
+                    yaw = float(np.arctan2(2.0 * (w * qz + qx * qy), 1.0 - 2.0 * (qy**2 + qz**2)))
+                dx_w = np.cos(yaw) * dx_b - np.sin(yaw) * dy_b
+                dy_w = np.sin(yaw) * dx_b + np.cos(yaw) * dy_b
+                dz_w = dz_b
+                current_target_pos = (current_target_pos + np.array([dx_w, dy_w, dz_w], dtype=np.float32))
+            elif wc.mode == "world":
+                current_target_pos = np.array(wc.target, dtype=np.float32)
+
         if active_patch and active_patch.safety_envelope and active_patch.safety_envelope.temp_setpoint_offset:
             offset = np.array(active_patch.safety_envelope.temp_setpoint_offset, dtype=np.float32) * ramp
             current_target_pos += offset
@@ -257,7 +276,7 @@ class System1Controller:
             att_kd_mult,
             current_target_pos,
             _,
-        ) = self._resolve_active_patch(sim_time, feedforward_force, motor_trim, target_pos)
+        ) = self._resolve_active_patch(sim_time, feedforward_force, motor_trim, target_pos, pos=pos, quat=quat)
 
         # ----------------------------------------------------------------------
         # 2. Coordinate Transformation (MuJoCo ENU/NWU -> Mini-QuadLib NED)
@@ -461,7 +480,7 @@ class System1Controller:
             att_kd_mult,
             current_target_pos,
             custom_max_tilt_deg,
-        ) = self._resolve_active_patch(sim_time, feedforward_force, motor_trim, target_pos)
+        ) = self._resolve_active_patch(sim_time, feedforward_force, motor_trim, target_pos, pos=pos, quat=quat)
 
         # Compute position error relative to setpoint
         err_x = x - current_target_pos[0]

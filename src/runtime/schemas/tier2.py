@@ -23,6 +23,29 @@ GAIN_MULT_MAX: float = 2.0
 MOTOR_TRIM_MIN: float = 0.5
 MOTOR_TRIM_MAX: float = 2.5
 SAFETY_MAX_TILT_DEG: float = 25.0  # upper bound; must also be positive
+WAYPOINT_MAX_VELOCITY: float = 5.0
+WAYPOINT_MIN_VELOCITY: float = 0.1
+WAYPOINT_MAX_CORRIDOR: float = 5.0
+WAYPOINT_MIN_CORRIDOR: float = 0.1
+
+
+@dataclass
+class WaypointCommand:
+    """System 2 autonomous waypoint guidance command."""
+    mode: str = "relative_body"  # "relative_body" or "world"
+    target: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])  # [dx, dy, dz] or [x, y, z]
+    yaw_deg: float = 0.0
+    max_velocity: float = 1.0
+    corridor_width: float = 0.6
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "mode": self.mode,
+            "target": [float(x) for x in self.target],
+            "yaw_deg": float(self.yaw_deg),
+            "max_velocity": float(self.max_velocity),
+            "corridor_width": float(self.corridor_width),
+        }
 
 
 @dataclass
@@ -59,17 +82,19 @@ class SafetyEnvelope:
 class System2Patch:
     """Structured patch emitted by System 2 to adjust System 1.
 
-    Corresponds to the 4 control levers:
+    Corresponds to the 5 control levers:
     1. feedforward_force_offset: [dFx, dFy, dFz] in Newtons
     2. gain_multipliers: {pos_kp, pos_kd, att_kp, att_kd}
     3. motor_trim_scale: [s1, s2, s3, s4] (e.g. [1.4, 1.0, 1.0, 1.0] for chipped prop)
     4. safety_envelope: {max_tilt_deg, temp_setpoint_offset}
+    5. waypoint_command: {mode, target, yaw_deg, max_velocity, corridor_width}
     """
     diagnosis: str = "Nominal"
     feedforward_force_offset: Optional[List[float]] = None
     gain_multipliers: Optional[GainMultipliers] = None
     motor_trim_scale: Optional[List[float]] = None
     safety_envelope: Optional[SafetyEnvelope] = None
+    waypoint_command: Optional[WaypointCommand] = None
     confidence: float = 1.0
     timestamp: float = 0.0
 
@@ -94,6 +119,20 @@ class System2Patch:
                 temp_setpoint_offset=se.get("temp_setpoint_offset"),
             )
 
+        wp = None
+        if "waypoint_command" in data and isinstance(data["waypoint_command"], dict):
+            wc_data = data["waypoint_command"]
+            t_raw = wc_data.get("target", [0.0, 0.0, 0.0])
+            if not isinstance(t_raw, list):
+                t_raw = list(t_raw)
+            wp = WaypointCommand(
+                mode=str(wc_data.get("mode", "relative_body")),
+                target=[float(x) for x in t_raw],
+                yaw_deg=float(wc_data.get("yaw_deg", 0.0)),
+                max_velocity=float(wc_data.get("max_velocity", 1.0)),
+                corridor_width=float(wc_data.get("corridor_width", 0.6)),
+            )
+
         ff = data.get("feedforward_force_offset")
         if ff is not None:
             ff = [float(x) for x in ff]
@@ -108,6 +147,7 @@ class System2Patch:
             gain_multipliers=gains,
             motor_trim_scale=trim,
             safety_envelope=envelope,
+            waypoint_command=wp,
             confidence=float(data.get("confidence", 1.0)),
             timestamp=float(data.get("timestamp", 0.0)),
         )
@@ -120,6 +160,7 @@ class System2Patch:
             "gain_multipliers": self.gain_multipliers.to_dict() if self.gain_multipliers else None,
             "motor_trim_scale": self.motor_trim_scale,
             "safety_envelope": self.safety_envelope.to_dict() if self.safety_envelope else None,
+            "waypoint_command": self.waypoint_command.to_dict() if self.waypoint_command else None,
             "confidence": self.confidence,
             "timestamp": self.timestamp,
         }
@@ -225,6 +266,33 @@ def validate_patch(patch: System2Patch) -> System2Patch:
                 _require_number(v, f"safety_envelope.temp_setpoint_offset[{i}]")
                 for i, v in enumerate(off)
             ]
+
+    if patch.waypoint_command is not None:
+        wc = patch.waypoint_command
+        if wc.mode not in ("relative_body", "world"):
+            raise ValueError(
+                f"System2Patch rejected: 'waypoint_command.mode' must be 'relative_body' or 'world', got {wc.mode!r}"
+            )
+        if len(wc.target) != 3:
+            raise ValueError(
+                f"System2Patch rejected: 'waypoint_command.target' must have 3 elements, got {len(wc.target)}"
+            )
+        wc.target = [
+            _require_number(wc.target[i], f"waypoint_command.target[{i}]")
+            for i in range(3)
+        ]
+        wc.yaw_deg = _require_number(wc.yaw_deg, "waypoint_command.yaw_deg")
+        raw_vel = _require_number(wc.max_velocity, "waypoint_command.max_velocity")
+        limited_vel = _clamp(raw_vel, WAYPOINT_MIN_VELOCITY, WAYPOINT_MAX_VELOCITY)
+        if limited_vel != raw_vel:
+            clamped_notes.append(f"waypoint max_velocity {raw_vel:.2f} -> {limited_vel:.2f} m/s")
+        wc.max_velocity = limited_vel
+
+        raw_corr = _require_number(wc.corridor_width, "waypoint_command.corridor_width")
+        limited_corr = _clamp(raw_corr, WAYPOINT_MIN_CORRIDOR, WAYPOINT_MAX_CORRIDOR)
+        if limited_corr != raw_corr:
+            clamped_notes.append(f"waypoint corridor_width {raw_corr:.2f} -> {limited_corr:.2f} m")
+        wc.corridor_width = limited_corr
 
     if clamped_notes:
         print(f"⚠️ [SYSTEM 2 VALIDATE] Clamped out-of-range patch values ({patch.diagnosis}):")
