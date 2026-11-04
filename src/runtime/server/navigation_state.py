@@ -307,6 +307,13 @@ class NavigationSimulationCoordinator:
                         reason=entry.get("trigger_reason", "Event triggered"),
                         diagnosis=entry.get("diagnosis", ""),
                     )
+                if entry and entry.get("vlm_completed"):
+                    self._record_event(
+                        sim_time=t_sim,
+                        event_type="VLM_PATCH_APPLIED",
+                        reason="Integrated Gemini multimodal cognitive patch",
+                        diagnosis=entry.get("diagnosis", ""),
+                    )
                 elif entry and entry.get("trigger_reason") and "transition" in entry.get("trigger_reason", "").lower():
                     self._record_event(
                         sim_time=t_sim,
@@ -463,6 +470,7 @@ class NavigationSimulationCoordinator:
             "vlm_model": self.vlm_model,
             "vlm_call_count": getattr(self.navigator, "_vlm_call_count", 0),
             "chaos_mode": self.chaos_mode,
+            "events": list(self.vlm_events)[:10],
             "perf": {
                 "peak_tilt": float(round(self.peak_tilt_deg, 1)),
                 "peak_l1_force": float(round(self.peak_l1_force_N, 2)),

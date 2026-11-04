@@ -1303,6 +1303,22 @@
       document.getElementById("patch-phase-name").innerText = data.phase;
       document.getElementById("vlm-call-counter").innerText = `VLM Calls: ${data.vlm_call_count || 0}`;
 
+      // Update Event Feed from real-time WebSocket push (no polling needed)
+      if (data.events && Array.isArray(data.events)) {
+        const feed = document.getElementById("events-feed-list");
+        if (feed) {
+          feed.innerHTML = data.events.slice(0, 10).map(e => `
+            <div class="event-item">
+              <div class="event-top">
+                <span>${e.type}</span>
+                <span>t=${e.time.toFixed(2)}s</span>
+              </div>
+              <div class="event-desc">${e.reason}</div>
+            </div>
+          `).join("");
+        }
+      }
+
       // Update Chart Buffer
       telemetryHistory.push({
         t: data.time,
@@ -1404,27 +1420,6 @@
         </tr>
       `).join("");
     }
-
-    // Periodic Event Feed Polling
-    function pollEvents() {
-      fetch("/api/navigation/events")
-        .then(r => r.json())
-        .then(data => {
-          if (data && data.events) {
-            const feed = document.getElementById("events-feed-list");
-            feed.innerHTML = data.events.slice(0, 10).map(e => `
-              <div class="event-item">
-                <div class="event-top">
-                  <span>${e.type}</span>
-                  <span>t=${e.time.toFixed(2)}s</span>
-                </div>
-                <div class="event-desc">${e.reason}</div>
-              </div>
-            `).join("");
-          }
-        });
-    }
-    setInterval(pollEvents, 1000);
 
     // Canvas Telemetry Waveform Renderer
     function renderTelemetryChart() {

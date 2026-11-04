@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import concurrent.futures
 import json
 import math
 import os
@@ -144,6 +145,14 @@ class AutonomousTargetNavigator:
         self._last_vlm_pos_err = 0.0
         self._vlm_call_count = 0
 
+        # Asynchronous non-blocking VLM background executor
+        self._vlm_pool: Optional[concurrent.futures.ThreadPoolExecutor] = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="VLMWorker"
+        )
+        self._vlm_future: Optional[concurrent.futures.Future] = None
+        self._pending_vlm_candidate: Optional[System2Patch] = None
+        self._last_vlm_trigger_reason: str = ""
+
     @property
     def renderer(self) -> mujoco.Renderer:
         if self._renderer is None:
@@ -155,7 +164,14 @@ class AutonomousTargetNavigator:
         self._renderer = val
 
     def close(self):
-        """Releases renderer resources."""
+        """Releases renderer and VLM worker resources."""
+        if hasattr(self, "_vlm_pool") and self._vlm_pool is not None:
+            try:
+                self._vlm_pool.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+            self._vlm_pool = None
+
         if self._renderer is not None and getattr(self, "_owns_renderer", True):
             try:
                 self._renderer.close()
@@ -227,7 +243,7 @@ class AutonomousTargetNavigator:
         """Queries Google Gemini multimodal API with live FPV image and telemetry."""
         import requests
 
-        api_key = os.getenv("GEMINI_API_KEY")
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if not api_key:
             print("   ⚠️ [VLM ERROR] GEMINI_API_KEY not configured in .env or environment")
             return None
@@ -259,12 +275,39 @@ class AutonomousTargetNavigator:
             },
         }
 
+        t_start = time.time()
         try:
             resp = requests.post(url, json=payload, timeout=20)
+            dur = time.time() - t_start
             if resp.status_code == 200:
                 raw_text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-                patch_dict = json.loads(raw_text)
-                return System2Patch.from_dict(patch_dict)
+                text = raw_text.strip()
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[1] if "\n" in text else text
+                    if text.endswith("```"):
+                        text = text[:-3].strip()
+                patch_dict = json.loads(text)
+                patch = System2Patch.from_dict(patch_dict)
+
+                # Log to audit ledger
+                try:
+                    log_file = PROJECT_ROOT / "logs" / "llm_calls.jsonl"
+                    log_file.parent.mkdir(parents=True, exist_ok=True)
+                    entry = {
+                        "call_id": f"vlm_{int(time.time()*1000)}",
+                        "timestamp_iso": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "duration_s": round(dur, 3),
+                        "model": self.vlm_model,
+                        "raw_output": raw_text,
+                        "parsed_patch": patch_dict,
+                        "status": "success",
+                    }
+                    with open(log_file, "a") as f_log:
+                        f_log.write(json.dumps(entry) + "\n")
+                except Exception:
+                    pass
+
+                return patch
             else:
                 print(f"⚠️ [VLM API ERROR] {resp.status_code}: {resp.text[:200]}")
         except Exception as e:
@@ -562,12 +605,38 @@ class AutonomousTargetNavigator:
             timestamp=sim_time,
         )
 
+    def _merge_vlm_patch(self, candidate: System2Patch, vlm: System2Patch) -> System2Patch:
+        """Merges VLM physical disturbance corrections with the candidate mission navigation trajectory."""
+        merged = System2Patch(
+            diagnosis=f"[VLM] {vlm.diagnosis}",
+            flight_phase=self.phase,
+            waypoint_command=candidate.waypoint_command,  # Always preserve active global navigation trajectory
+            feedforward_force_offset=vlm.feedforward_force_offset or candidate.feedforward_force_offset,
+            gain_multipliers=vlm.gain_multipliers or candidate.gain_multipliers,
+            motor_trim_scale=vlm.motor_trim_scale or candidate.motor_trim_scale,
+            safety_envelope=vlm.safety_envelope or candidate.safety_envelope,
+            timestamp=candidate.timestamp,
+        )
+
+        # Micro setpoint nudge (if VLM suggested obstacle avoidance offset)
+        if vlm.safety_envelope and vlm.safety_envelope.temp_setpoint_offset:
+            if merged.safety_envelope:
+                merged.safety_envelope.temp_setpoint_offset = vlm.safety_envelope.temp_setpoint_offset
+
+        # Stricter tilt limit (e.g. 12 deg for window ingress)
+        if vlm.safety_envelope and vlm.safety_envelope.max_tilt_deg:
+            cand_tilt = candidate.safety_envelope.max_tilt_deg if candidate.safety_envelope else 20.0
+            merged.safety_envelope.max_tilt_deg = min(cand_tilt, vlm.safety_envelope.max_tilt_deg)
+
+        return merged
+
     def step_cognitive_cycle(self, sim_time: float) -> Optional[dict]:
         """Runs the System 2 cognitive decision loop using sensors & FPV image only.
         
         Evaluates whether a VLM call is necessary. If necessary (startup, phase transition,
-        force disturbance, motor failure, or periodic heartbeat), queries the VLM reasoner.
-        Otherwise, maintains smooth reflexive station-keeping without wasteful calls.
+        force disturbance, motor failure, or periodic heartbeat), queries the VLM reasoner
+        asynchronously in the background so System 1 physics stepping and live FPV video
+        streaming are never blocked.
         """
         if sim_time - self.last_s2_time < self.s2_interval:
             return None
@@ -580,41 +649,56 @@ class AutonomousTargetNavigator:
         # Update candidate patch from visual-inertial reasoner to track phase state
         candidate_patch = self._visual_inertial_reasoner(telemetry, sim_time)
 
-        # 2. Check if System 2 VLM reasoning is necessary
+        # 2. Check if a previously dispatched asynchronous VLM call has finished
+        vlm_completed = False
+        if self._vlm_future is not None and self._vlm_future.done():
+            try:
+                vlm_res = self._vlm_future.result()
+                if vlm_res is not None:
+                    vlm_patch_applied = self._merge_vlm_patch(candidate_patch, vlm_res)
+                    self.sim.bridge.apply_system2_patch(vlm_patch_applied)
+                    vlm_completed = True
+                    print(f"🧠 [VLM COMPLETED] Injected Gemini patch: {vlm_res.diagnosis}")
+            except Exception as e:
+                print(f"⚠️ [VLM WORKER EXCEPTION] {e}")
+            finally:
+                self._vlm_future = None
+
+        # 3. Check if a new System 2 VLM reasoning query is needed
         vlm_needed, trigger_reason = self.should_query_vlm(telemetry, sim_time, candidate_patch)
 
-        patch: Optional[System2Patch] = None
         vlm_invoked = False
-
         if vlm_needed:
-            if self.use_vlm:
-                # Capture live FPV frame with calibrated HUD overlay strictly when querying VLM
+            if self.use_vlm and self._vlm_future is None and self._vlm_pool is not None:
+                # Dispatch async VLM query without blocking physics loop
                 _, img_path = self.capture_fpv_image_with_hud()
                 print(f"🧠 [VLM TRIGGER] t={sim_time:.2f}s: Querying VLM Reasoner ({self.vlm_model}) -> {trigger_reason}")
-                patch = self._query_live_vlm(img_path, telemetry)
-                vlm_invoked = True
+                self._last_vlm_trigger_reason = trigger_reason
                 self._vlm_call_count += 1
+                vlm_invoked = True
+                self._vlm_future = self._vlm_pool.submit(self._query_live_vlm, img_path, telemetry)
 
-            if patch is None:
-                patch = candidate_patch
-
-            # Update condition tracking
+            # Update condition tracking using candidate navigation target
             self.last_vlm_call_time = sim_time
             self._prev_phase = self.phase
-            if patch and patch.waypoint_command and patch.waypoint_command.target:
-                self._prev_waypoint_target = np.array(patch.waypoint_command.target[:3], dtype=np.float32)
+            if candidate_patch and candidate_patch.waypoint_command and candidate_patch.waypoint_command.target:
+                self._prev_waypoint_target = np.array(candidate_patch.waypoint_command.target[:3], dtype=np.float32)
             f_dist = telemetry.get("unmodeled_force_disturbance_N", [0.0, 0.0, 0.0])
             self._last_vlm_force_norm = float(np.linalg.norm(f_dist))
             smoothed_pos = getattr(self.sim.controller, "smoothed_target_pos", self.sim.controller.target_pos)
             curr_pos = self.sim.data.qpos[0:3]
             self._last_vlm_pos_err = float(np.linalg.norm(smoothed_pos - curr_pos))
 
-            # Inject patch into System 1 controller via bridge
-            self.sim.bridge.apply_system2_patch(patch)
+            # Apply candidate patch if no VLM patch was applied this tick
+            if not vlm_completed:
+                self.sim.bridge.apply_system2_patch(candidate_patch)
         else:
             # Reflexive hold: System 1 controller continues executing active patch with smoothing
             active_patch = self.sim.bridge.get_active_patch()
-            patch = active_patch or candidate_patch
+            if active_patch is None:
+                self.sim.bridge.apply_system2_patch(candidate_patch)
+
+        active_patch = self.sim.bridge.get_active_patch() or candidate_patch
 
         # Telemetry logging
         log_entry = {
@@ -622,10 +706,11 @@ class AutonomousTargetNavigator:
             "phase": self.phase,
             "alt": telemetry["altitude_m"],
             "yaw": telemetry["attitude_deg"]["yaw"],
-            "diagnosis": patch.diagnosis if patch else "Reflexive hold",
+            "diagnosis": active_patch.diagnosis if active_patch else "Reflexive hold",
             "vlm_invoked": vlm_invoked,
+            "vlm_completed": vlm_completed,
             "trigger_reason": trigger_reason if vlm_needed else "Reflexive hold within tolerance",
-            "waypoint": patch.waypoint_command.to_dict() if (patch and patch.waypoint_command) else None,
+            "waypoint": active_patch.waypoint_command.to_dict() if (active_patch and active_patch.waypoint_command) else None,
         }
         self.flight_log.append(log_entry)
         return log_entry
