@@ -34,7 +34,7 @@
     <body name="x2" pos="0 0 0.1" childclass="x2">
       <freejoint/>
       <!-- Chase / tracking camera positioned behind drone looking forward along +X -->
-      <camera name="track" pos="-1.2 0 .5" xyaxes="0 -1 0 1 0 2" mode="trackcom"/>
+      <camera name="track" pos="-1.2 0 .5" xyaxes="0 -1 0 1 0 2" mode="fixed"/>
       <!-- Forward-facing FPV camera mounted on drone nose looking along +X with 8.6° downward tilt -->
       <camera name="fpv" pos="0.16 0 0.06" xyaxes="0 -1 0 0.15 0 0.988" fovy="90"/>
       <site name="imu" pos="0 0 .02"/>

@@ -197,6 +197,51 @@ class TestFPVCameraAndAssets(unittest.TestCase):
         self.assertIn("pylon_left", geom_names)
         self.assertIn("pylon_right", geom_names)
 
+    def test_track_camera_rotates_with_drone_alignment(self):
+        """Verifies that the TPP track camera is fixed to the drone body and rotates with heading."""
+        m = mujoco.MjModel.from_xml_path("assets/skydio_x2/scene.xml")
+        d = mujoco.MjData(m)
+        track_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_CAMERA, "track")
+        self.assertGreaterEqual(track_id, 0)
+        # Verify mode is fixed (mjCAMLIGHT_FIXED == 0), so it rotates with body rather than staying static in world
+        self.assertEqual(m.cam_mode[track_id], mujoco.mjtCamLight.mjCAMLIGHT_FIXED)
+
+        # Baseline: drone at (0, 0, 1) facing +X (yaw 0)
+        d.qpos[0:3] = [0.0, 0.0, 1.0]
+        d.qpos[3:7] = [1.0, 0.0, 0.0, 0.0]
+        mujoco.mj_forward(m, d)
+        initial_pos = np.copy(d.cam_xpos[track_id])
+        initial_mat = np.copy(d.cam_xmat[track_id].reshape(3, 3))
+        # Initial position should be along -X (behind drone)
+        self.assertLess(initial_pos[0], 0.0)
+
+        # Rotate drone 90 deg yaw to face +Y
+        d.qpos[3:7] = [np.cos(np.pi / 4), 0.0, 0.0, np.sin(np.pi / 4)]
+        mujoco.mj_forward(m, d)
+        yaw90_pos = np.copy(d.cam_xpos[track_id])
+        yaw90_mat = np.copy(d.cam_xmat[track_id].reshape(3, 3))
+
+        # In TPP, when drone faces +Y, camera must be behind drone along -Y
+        self.assertLess(yaw90_pos[1], -0.5)
+        # Orientation matrix must rotate 90 degrees around Z
+        expected_mat = np.array([
+            [0, -1, 0],
+            [1, 0, 0],
+            [0, 0, 1],
+        ]) @ initial_mat
+        np.testing.assert_allclose(yaw90_mat, expected_mat, atol=1e-3)
+
+    def test_tracking_camera_heading_alignment(self):
+        """Verifies dynamic azimuth calculation aligns chase camera behind quadrotor across headings."""
+        test_angles_deg = [0.0, 45.0, 90.0, 180.0, -90.0]
+        for deg in test_angles_deg:
+            rad = np.radians(deg)
+            q = [np.cos(rad / 2.0), 0.0, 0.0, np.sin(rad / 2.0)]
+            computed_yaw = float(np.degrees(
+                np.arctan2(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2]**2 + q[3]**2))
+            ))
+            self.assertAlmostEqual(computed_yaw, deg, places=3)
+
     def test_routes_fpv_camera_dict(self):
         # All required identifiers must be in CAMERAS dictionary
         self.assertIn("drone1", CAMERAS)

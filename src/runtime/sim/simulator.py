@@ -240,6 +240,16 @@ class DroneSimulator:
                 if now - last_render >= render_interval:
                     # Enforce geom groups 0, 1, 2 visible so the drone never disappears
                     viewer.opt.geomgroup[0:3] = 1
+                    # Keep chase camera aligned with drone heading in TPP
+                    if viewer.cam.fixedcamid == -1 or viewer.cam.type == mujoco.mjtCamera.mjCAMERA_TRACKING:
+                        q = self.data.qpos[3:7]
+                        drone_yaw_deg = float(np.degrees(
+                            np.arctan2(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2]**2 + q[3]**2))
+                        ))
+                        if viewer.cam.fixedcamid == -1:
+                            viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+                            viewer.cam.trackbodyid = self.drone_body_id
+                        viewer.cam.azimuth = drone_yaw_deg
                     viewer.sync()
                     last_render = now
 

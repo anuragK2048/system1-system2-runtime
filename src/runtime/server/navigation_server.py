@@ -463,10 +463,40 @@ def main():
                     viewer.cam.distance = 2.8
                     viewer.cam.elevation = -18.0
 
+                    last_cam_mode = None
+
                     while viewer.is_running() and not nav_coordinator.shutdown_event.is_set():
                         # Synchronize with physics step loop so viewer.sync never copies mid-step
                         with nav_coordinator.sim_lock:
+                            # Current drone orientation yaw angle from simulation quaternion [w, qx, qy, qz]
+                            q = nav_coordinator.sim.data.qpos[3:7]
+                            drone_yaw_deg = float(np.degrees(
+                                np.arctan2(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2]**2 + q[3]**2))
+                            ))
+
                             with viewer.lock():
+                                # Keep chase camera locked behind drone and rotating with heading in TPP
+                                if viewer.cam.fixedcamid == -1:
+                                    viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+                                    viewer.cam.trackbodyid = nav_coordinator.sim.drone_body_id
+                                    viewer.cam.azimuth = drone_yaw_deg
+                                    if viewer.cam.distance <= 0.1:
+                                        viewer.cam.distance = 2.8
+                                    if viewer.cam.elevation > -5.0 or viewer.cam.elevation < -85.0:
+                                        viewer.cam.elevation = -18.0
+                                elif viewer.cam.type == mujoco.mjtCamera.mjCAMERA_TRACKING:
+                                    viewer.cam.azimuth = drone_yaw_deg
+
+                                current_cam_tuple = (int(viewer.cam.type), int(viewer.cam.fixedcamid))
+                                if current_cam_tuple != last_cam_mode:
+                                    last_cam_mode = current_cam_tuple
+                                    if viewer.cam.fixedcamid == 1:
+                                        print("🎥 [VIEWPORT CAMERA] First-Person Cockpit View (FPV Nose Mount)")
+                                    elif viewer.cam.fixedcamid == 0:
+                                        print("🎥 [VIEWPORT CAMERA] Fixed Third-Person Chase Camera (Attached to Drone Frame)")
+                                    else:
+                                        print("🎥 [VIEWPORT CAMERA] Dynamic Third-Person Chase Camera (Auto-Aligning with Heading)")
+
                                 viewer.sync()
                         time.sleep(1.0 / 60.0)
             except RuntimeError as gui_err:
