@@ -200,7 +200,7 @@ def _render_frame(sim, camera_name: str, enable_hud: bool = True) -> bytes:
                 from PIL import Image
 
                 hud = _get_hud(camera_name)
-                cam = hud.extract_camera_calibration(sim.model, _render_data)
+                cam = hud.get_camera_extrinsics(sim.model, _render_data)
 
                 # Resolve drone body position & velocity across single and dual models
                 d_id = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_BODY, "x2")

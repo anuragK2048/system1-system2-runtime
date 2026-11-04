@@ -307,6 +307,9 @@ class HUDProjector:
             yaw_deg=rpy[2],
         )
 
+    # Backward-compatible alias for camera extrinsics extraction
+    extract_camera_calibration = get_camera_extrinsics
+
     @staticmethod
     def _compute_rpy(fwd: np.ndarray, up: np.ndarray, right: np.ndarray) -> Tuple[float, float, float]:
         """Extracts aeronautical (roll, pitch, yaw) angles in degrees."""

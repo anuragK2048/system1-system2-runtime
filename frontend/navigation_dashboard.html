@@ -841,7 +841,7 @@
             </div>
 
             <!-- Integrated Avionics Tape Overlay -->
-            <div class="hud-bottom-telemetry">
+            <div class="hud-bottom-telemetry" id="hud-bottom-telemetry">
               <div class="hud-stat-group">
                 <div class="hud-item">
                   <span class="k">ALTITUDE (Z)</span>
@@ -1498,6 +1498,8 @@
     function setHudMode(enabled) {
       isHudEnabled = enabled;
       if (hudSwitch) hudSwitch.checked = enabled;
+      const bottomTelem = document.getElementById("hud-bottom-telemetry");
+      if (bottomTelem) bottomTelem.style.display = enabled ? "block" : "none";
 
       if (enabled) {
         if (hudLabel) { hudLabel.style.color = "var(--cyan-bright)"; hudLabel.style.fontWeight = "700"; }

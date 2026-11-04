@@ -502,8 +502,10 @@ class NavigationSimulationCoordinator:
 
             if enable_hud:
                 try:
-                    cam = self._hud.extract_camera_calibration(self.sim.model, self._render_data)
+                    cam = self._hud.get_camera_extrinsics(self.sim.model, self._render_data)
                     d_id = mujoco.mj_name2id(self.sim.model, mujoco.mjtObj.mjOBJ_BODY, "x2")
+                    if d_id < 0:
+                        d_id = mujoco.mj_name2id(self.sim.model, mujoco.mjtObj.mjOBJ_BODY, "drone")
                     drone_pos = self._render_data.xpos[d_id] if d_id >= 0 else None
                     drone_vel = self._render_data.cvel[d_id][3:6] if d_id >= 0 else None
 
@@ -519,8 +521,8 @@ class NavigationSimulationCoordinator:
                     buf = io.BytesIO()
                     overlaid.save(buf, format="JPEG", quality=JPEG_QUALITY)
                     return buf.getvalue()
-                except Exception:
-                    pass
+                except Exception as hud_err:
+                    print(f"⚠️ [HUD OVERLAY ERROR] {hud_err}")
 
             buf = io.BytesIO()
             Image.fromarray(raw_rgb).save(buf, format="JPEG", quality=JPEG_QUALITY)
