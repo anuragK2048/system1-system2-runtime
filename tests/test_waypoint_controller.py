@@ -146,6 +146,34 @@ class TestSystem1WaypointResolution(unittest.TestCase):
         # Facing +Y: forward 2.0m along body X maps to +2.0m along world Y
         np.testing.assert_allclose(resolved_target, [0.0, 2.0, 0.5], atol=1e-4)
 
+    def test_yaw_setpoint_resolution(self):
+        # World mode yaw setpoint
+        patch = System2Patch(
+            diagnosis="Orient left towards window",
+            waypoint_command=WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=90.0),
+        )
+        self.bridge.apply_system2_patch(patch)
+        self.controller._resolve_active_patch(
+            sim_time=0.0, explicit_ff=None, explicit_trim=None, target_pos=np.array([0.0, 0.0, 1.0])
+        )
+        self.assertAlmostEqual(np.degrees(self.controller.target_yaw_rad), 90.0, places=2)
+
+    def test_yaw_slew_rate_limiting(self):
+        # Set target yaw to +90 degrees (pi/2)
+        self.controller.target_yaw_rad = float(np.pi / 2.0)
+        self.controller.smoothed_yaw_rad = 0.0
+        dt = 0.002
+        pos = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        vel = np.zeros(3, dtype=np.float32)
+        quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        omega = np.zeros(3, dtype=np.float32)
+        _, diag = self.controller.compute_motor_thrusts(pos, vel, quat, omega, sim_time=0.0, dt=dt)
+        # Slew rate: 1.2 rad/s * 0.002s = 0.0024 rad
+        self.assertLessEqual(self.controller.smoothed_yaw_rad, 1.2 * dt + 1e-5)
+        self.assertIn("target_yaw_deg", diag)
+        self.assertIn("smoothed_yaw_deg", diag)
+        self.assertIn("current_yaw_deg", diag)
+
 
 class TestFPVCameraAndAssets(unittest.TestCase):
     """Tests that MuJoCo assets, FPV camera, and CAMERAS route mappings are configured."""

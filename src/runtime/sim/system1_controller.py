@@ -24,6 +24,7 @@ This controller integrates Mini-QuadLib, implementing:
    Quadrotors With Performance Guarantees' (IEEE TCST, 2025).
 """
 
+import math
 import time
 from typing import Optional, Tuple, Dict, Any, List
 import numpy as np
@@ -109,12 +110,31 @@ class System1Controller:
         # T = diag(1, -1, -1) -> 180 deg roll rotation
         self._T = np.diag([1.0, -1.0, -1.0])
 
+        # Desired heading in MuJoCo frame (radians, counterclockwise from +X forward)
+        self.target_yaw_rad: float = 0.0
+        # Smoothed heading and yaw rate setpoint fed to the tracking controller
+        self.smoothed_yaw_rad: float = 0.0
+        self.smoothed_yaw_rate: float = 0.0
+        # Maximum yaw rotation rate and angular acceleration limits
+        self.max_yaw_rate_rad_s: float = 0.80
+        self.max_yaw_accel_rad_s2: float = 2.00
+        # Latched waypoint tracking for active patch
+        self._latched_patch_id: Optional[int] = None
+        self._latched_waypoint_pos: Optional[np.ndarray] = None
+        self._latched_waypoint_yaw: Optional[float] = None
+
         # Persistent L1 Adaptive State for online disturbance estimation
         self.l1_state = L1AdaptiveState()
 
     def reset_l1_state(self) -> None:
-        """Resets the L1 adaptive observer state back to zero."""
+        """Resets the L1 adaptive observer state back to zero and neutral heading."""
         self.l1_state = L1AdaptiveState()
+        self.target_yaw_rad = 0.0
+        self.smoothed_yaw_rad = 0.0
+        self.smoothed_yaw_rate = 0.0
+        self._latched_patch_id = None
+        self._latched_waypoint_pos = None
+        self._latched_waypoint_yaw = None
 
     def _resolve_active_patch(
         self,
@@ -179,22 +199,45 @@ class System1Controller:
 
         # Target setpoint in MuJoCo frame
         current_target_pos = (target_pos if target_pos is not None else self.target_pos).copy()
+        current_target_yaw_rad = self.target_yaw_rad
 
         # Autonomous Waypoint Guidance
         if active_patch and active_patch.waypoint_command:
             wc = active_patch.waypoint_command
-            if wc.mode == "relative_body":
-                dx_b, dy_b, dz_b = wc.target
-                yaw = 0.0
-                if quat is not None:
-                    w, qx, qy, qz = quat
-                    yaw = float(np.arctan2(2.0 * (w * qz + qx * qy), 1.0 - 2.0 * (qy**2 + qz**2)))
-                dx_w = np.cos(yaw) * dx_b - np.sin(yaw) * dy_b
-                dy_w = np.sin(yaw) * dx_b + np.cos(yaw) * dy_b
-                dz_w = dz_b
-                current_target_pos = (current_target_pos + np.array([dx_w, dy_w, dz_w], dtype=np.float32))
-            elif wc.mode == "world":
-                current_target_pos = np.array(wc.target, dtype=np.float32)
+            # Latch waypoint for this specific patch instance to prevent cumulative offset integration
+            if id(active_patch) != self._latched_patch_id:
+                if wc.mode == "relative_body":
+                    dx_b, dy_b, dz_b = wc.target
+                    current_yaw = 0.0
+                    if quat is not None:
+                        w, qx, qy, qz = quat
+                        current_yaw = float(np.arctan2(2.0 * (w * qz + qx * qy), 1.0 - 2.0 * (qy**2 + qz**2)))
+                    dx_w = np.cos(current_yaw) * dx_b - np.sin(current_yaw) * dy_b
+                    dy_w = np.sin(current_yaw) * dx_b + np.cos(current_yaw) * dy_b
+                    dz_w = dz_b
+                    self._latched_waypoint_pos = (current_target_pos + np.array([dx_w, dy_w, dz_w], dtype=np.float32))
+                    if wc.yaw_deg is not None:
+                        self._latched_waypoint_yaw = current_yaw + math.radians(wc.yaw_deg)
+                    else:
+                        self._latched_waypoint_yaw = self.target_yaw_rad
+                elif wc.mode == "world":
+                    self._latched_waypoint_pos = np.array(wc.target, dtype=np.float32)
+                    if wc.yaw_deg is not None:
+                        self._latched_waypoint_yaw = math.radians(wc.yaw_deg)
+                    else:
+                        self._latched_waypoint_yaw = self.target_yaw_rad
+                self._latched_patch_id = id(active_patch)
+
+            if self._latched_waypoint_pos is not None:
+                current_target_pos = self._latched_waypoint_pos.copy()
+            if self._latched_waypoint_yaw is not None:
+                current_target_yaw_rad = self._latched_waypoint_yaw
+        else:
+            self._latched_patch_id = None
+            self._latched_waypoint_pos = None
+            self._latched_waypoint_yaw = None
+
+        self.target_yaw_rad = float(current_target_yaw_rad)
 
         if active_patch and active_patch.safety_envelope and active_patch.safety_envelope.temp_setpoint_offset:
             offset = np.array(active_patch.safety_envelope.temp_setpoint_offset, dtype=np.float32) * ramp
@@ -244,7 +287,7 @@ class System1Controller:
         """
         if self.mode == "pid":
             return self._compute_pid_thrusts(
-                pos, vel, quat, omega, feedforward_force, motor_trim, sim_time, target_pos
+                pos, vel, quat, omega, feedforward_force, motor_trim, sim_time, target_pos, dt=dt
             )
 
         return self._compute_l1_thrusts(
@@ -338,7 +381,23 @@ class System1Controller:
             if err_xy_norm > max_err_xy:
                 desired_pos_ned[:2] = pos_ned[:2] + err_xy * (max_err_xy / err_xy_norm)
 
-        setpoint = QuadrotorSetpoint(position=desired_pos_ned, acceleration=acc_ff_ned)
+        # Smoothly slew commanded yaw setpoint towards target_yaw_rad with bounded acceleration
+        yaw_diff = (self.target_yaw_rad - self.smoothed_yaw_rad + np.pi) % (2.0 * np.pi) - np.pi
+        target_rate = float(np.clip(yaw_diff / 0.35, -self.max_yaw_rate_rad_s, self.max_yaw_rate_rad_s))
+        max_rate_step = self.max_yaw_accel_rad_s2 * dt
+        rate_step = float(np.clip(target_rate - self.smoothed_yaw_rate, -max_rate_step, max_rate_step))
+        self.smoothed_yaw_rate += rate_step
+        self.smoothed_yaw_rad += self.smoothed_yaw_rate * dt
+
+        # Convert target yaw from MuJoCo (CCW from +X) to NED (CW from +X North): yaw_ned = -yaw_mujoco
+        desired_yaw_ned = -self.smoothed_yaw_rad
+        desired_yaw_rate_ned = -self.smoothed_yaw_rate
+        setpoint = QuadrotorSetpoint(
+            position=desired_pos_ned,
+            acceleration=acc_ff_ned,
+            yaw=float(desired_yaw_ned),
+            yaw_dot=float(desired_yaw_rate_ned),
+        )
 
         # ----------------------------------------------------------------------
         # 3. Geometric Baseline Controller (SE(3) tracking)
@@ -449,6 +508,10 @@ class System1Controller:
             "is_triggered": is_triggered,
             "trigger_reasons": trigger_reasons,
             "pos_error": [float(x) for x in (current_target_pos - pos)],
+            "motor_thrusts": [float(x) for x in motor_thrusts],
+            "target_yaw_deg": float(np.degrees(self.target_yaw_rad)),
+            "smoothed_yaw_deg": float(np.degrees(self.smoothed_yaw_rad)),
+            "current_yaw_deg": float(yaw_deg),
         }
 
         return motor_thrusts, diagnostics
@@ -463,6 +526,7 @@ class System1Controller:
         motor_trim: Optional[np.ndarray],
         sim_time: float,
         target_pos: Optional[np.ndarray] = None,
+        dt: float = 0.002,
     ) -> Tuple[np.ndarray, dict]:
         """PID reflex controller with optional System 2 patch adaptation."""
         x, y, z = pos
@@ -481,6 +545,14 @@ class System1Controller:
             current_target_pos,
             custom_max_tilt_deg,
         ) = self._resolve_active_patch(sim_time, feedforward_force, motor_trim, target_pos, pos=pos, quat=quat)
+
+        # Smoothly slew commanded yaw setpoint towards target_yaw_rad with bounded acceleration
+        yaw_diff = (self.target_yaw_rad - self.smoothed_yaw_rad + np.pi) % (2.0 * np.pi) - np.pi
+        target_rate = float(np.clip(yaw_diff / 0.35, -self.max_yaw_rate_rad_s, self.max_yaw_rate_rad_s))
+        max_rate_step = self.max_yaw_accel_rad_s2 * dt
+        rate_step = float(np.clip(target_rate - self.smoothed_yaw_rate, -max_rate_step, max_rate_step))
+        self.smoothed_yaw_rate += rate_step
+        self.smoothed_yaw_rad += self.smoothed_yaw_rate * dt
 
         # Compute position error relative to setpoint
         err_x = x - current_target_pos[0]
@@ -517,11 +589,14 @@ class System1Controller:
         # Attitude & Heading
         roll_err = target_roll - (2.0 * quat[1])
         pitch_err = target_pitch - (2.0 * quat[2])
-        yaw_err = 0.0 - (2.0 * quat[3])
+        w, qx, qy, qz = quat
+        current_yaw = float(np.arctan2(2.0 * (w * qz + qx * qy), 1.0 - 2.0 * (qy**2 + qz**2)))
+        raw_yaw_err = self.smoothed_yaw_rad - current_yaw
+        yaw_err = float(np.arctan2(np.sin(raw_yaw_err), np.cos(raw_yaw_err)))
 
         tau_x = (self.pid_cfg.kp_att * att_kp_mult) * roll_err - (self.pid_cfg.kd_att * att_kd_mult) * omega[0]
         tau_y = (self.pid_cfg.kp_att * att_kp_mult) * pitch_err - (self.pid_cfg.kd_att * att_kd_mult) * omega[1]
-        tau_z = self.pid_cfg.kp_yaw * yaw_err - self.pid_cfg.kd_yaw * omega[2]
+        tau_z = self.pid_cfg.kp_yaw * yaw_err - self.pid_cfg.kd_yaw * (omega[2] - self.smoothed_yaw_rate)
 
         demands = np.array([F_z, tau_x, tau_y, tau_z])
         motor_thrusts = self.B_INV @ demands
@@ -563,5 +638,9 @@ class System1Controller:
             "is_triggered": is_triggered,
             "trigger_reasons": trigger_reasons,
             "pos_error": [float(val) for val in (current_target_pos - pos)],
+            "motor_thrusts": [float(val) for val in motor_thrusts],
+            "target_yaw_deg": float(np.degrees(self.target_yaw_rad)),
+            "smoothed_yaw_deg": float(np.degrees(self.smoothed_yaw_rad)),
+            "current_yaw_deg": float(np.degrees(current_yaw)),
         }
         return motor_thrusts, diagnostics
