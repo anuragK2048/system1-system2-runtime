@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.162.0",
+    "google-genai>=2.34.0",
     "groq>=1.7.0",
     "mujoco>=3.17.0",
     "openai>=3.39.0",
