@@ -277,61 +277,82 @@
       font-family: var(--font-mono);
     }
 
-    /* Glass HUD Overlay Elements on Video */
-    .hud-overlay-banner {
-      position: absolute;
-      inset-block-start: 12px;
-      inset-inline-start: 12px;
+    /* External Camera Telemetry & Status Strips (Dedicated outside FPV video) */
+    .camera-status-strip {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg-darker);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .camera-status-left {
       display: flex;
       align-items: center;
       gap: 8px;
-      background: rgba(6, 8, 12, 0.75);
-      border: 1px solid rgba(0, 229, 255, 0.35);
-      padding-block: 4px;
-      padding-inline: 10px;
-      border-radius: 6px;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--cyan-bright);
-      backdrop-filter: blur(8px);
-      z-index: 10;
     }
 
-    .hud-phase-banner {
-      position: absolute;
-      inset-block-start: 12px;
-      inset-inline-end: 12px;
-      background: rgba(6, 8, 12, 0.75);
-      border: 1px solid rgba(0, 255, 157, 0.4);
-      padding-block: 4px;
-      padding-inline: 10px;
-      border-radius: 6px;
+    .rec-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--crimson-bright);
+      font-weight: 700;
+      font-size: 10px;
+      letter-spacing: 0.5px;
+    }
+
+    .rec-dot {
+      inline-size: 7px;
+      block-size: 7px;
+      border-radius: 50%;
+      background: var(--crimson-bright);
+      box-shadow: 0 0 6px rgba(255, 51, 102, 0.8);
+      animation: pulse-rec 1.4s infinite ease-in-out;
+    }
+
+    @keyframes pulse-rec {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.3; transform: scale(0.85); }
+    }
+
+    .cam-badge {
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      border: 1px solid rgba(0, 229, 255, 0.25);
+      background: rgba(0, 229, 255, 0.08);
+      color: var(--cyan-bright);
+      font-weight: 600;
+    }
+
+    .camera-phase-badge {
+      background: rgba(0, 255, 157, 0.1);
+      border: 1px solid rgba(0, 255, 157, 0.35);
+      padding: 3px 10px;
+      border-radius: 5px;
       font-family: var(--font-mono);
       font-size: 11px;
       color: var(--mint-bright);
-      font-weight: 600;
-      backdrop-filter: blur(8px);
-      z-index: 10;
+      font-weight: 700;
+      letter-spacing: 0.5px;
     }
 
-    /* Flight Director Avionics Ribbon on Bottom of FPV */
-    .hud-bottom-telemetry {
-      position: absolute;
-      inset-block-end: 12px;
-      inset-inline-start: 12px;
-      inset-inline-end: 12px;
-      background: rgba(6, 8, 12, 0.82);
+    /* Dedicated Avionics Telemetry Ribbon (Positioned outside FPV video below) */
+    .camera-telemetry-ribbon {
+      background: var(--bg-darker);
       border: 1px solid var(--border-color);
       border-radius: 6px;
-      padding-block: 6px;
-      padding-inline: 12px;
+      padding: 8px 12px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       font-family: var(--font-mono);
       font-size: 11px;
-      backdrop-filter: blur(8px);
-      z-index: 10;
     }
 
     .hud-stat-group {
@@ -815,18 +836,21 @@
           </div>
         </div>
 
-        <div class="panel-body" style="padding: 0;">
-          <div class="fpv-container">
-            <div class="hud-overlay-banner">
-              <span>● FPV REC</span>
-              <span id="hud-vlm-mode">DETERMINISTIC VLM</span>
-              <span id="hud-view-indicator" style="background: rgba(0, 240, 255, 0.15); color: var(--cyan-bright); padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: 700; border: 1px solid rgba(0, 240, 255, 0.3);">HUD: ON</span>
+        <div class="panel-body" style="padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+          <!-- Camera Status Bar (Positioned cleanly outside video, above) -->
+          <div class="camera-status-strip">
+            <div class="camera-status-left">
+              <span class="rec-badge"><span class="rec-dot"></span>FPV REC</span>
+              <span class="cam-badge" id="hud-vlm-mode">DETERMINISTIC VLM</span>
+              <span class="cam-badge" id="hud-view-indicator" style="background: rgba(0, 240, 255, 0.15); color: var(--cyan-bright); border-color: rgba(0, 240, 255, 0.3);">HUD: ON</span>
             </div>
-
-            <div class="hud-phase-banner" id="hud-flight-phase">
+            <div class="camera-phase-badge" id="hud-flight-phase">
               PHASE_0_LIFTOFF
             </div>
+          </div>
 
+          <!-- Clean Unobstructed FPV Container (Pure camera view screen, zero overlapping text) -->
+          <div class="fpv-container">
             <img
               id="fpv-stream-img"
               class="fpv-video"
@@ -839,37 +863,37 @@
               <span style="font-size: 24px;">📡</span>
               <span>CONNECTING TO FPV CAMERA STREAM...</span>
             </div>
+          </div>
 
-            <!-- Integrated Avionics Tape Overlay -->
-            <div class="hud-bottom-telemetry" id="hud-bottom-telemetry">
-              <div class="hud-stat-group">
-                <div class="hud-item">
-                  <span class="k">ALTITUDE (Z)</span>
-                  <span class="v cyan" id="hud-alt">0.80 m</span>
-                </div>
-                <div class="hud-item">
-                  <span class="k">AIRSPEED (V)</span>
-                  <span class="v mint" id="hud-speed">0.00 m/s</span>
-                </div>
-                <div class="hud-item">
-                  <span class="k">YAW HEADING</span>
-                  <span class="v" id="hud-yaw">+0.0°</span>
-                </div>
+          <!-- Dedicated Avionics Telemetry Ribbon (Positioned cleanly outside video, below) -->
+          <div class="camera-telemetry-ribbon" id="hud-bottom-telemetry">
+            <div class="hud-stat-group">
+              <div class="hud-item">
+                <span class="k">ALTITUDE (Z)</span>
+                <span class="v cyan" id="hud-alt">0.80 m</span>
               </div>
+              <div class="hud-item">
+                <span class="k">AIRSPEED (V)</span>
+                <span class="v mint" id="hud-speed">0.00 m/s</span>
+              </div>
+              <div class="hud-item">
+                <span class="k">YAW HEADING</span>
+                <span class="v" id="hud-yaw">+0.0°</span>
+              </div>
+            </div>
 
-              <div class="hud-stat-group">
-                <div class="hud-item">
-                  <span class="k">TARGET DIST</span>
-                  <span class="v amber" id="hud-dist-tgt">5.50 m</span>
-                </div>
-                <div class="hud-item">
-                  <span class="k">L1 RESIDUAL</span>
-                  <span class="v" id="hud-l1-force">0.0 N</span>
-                </div>
-                <div class="hud-item">
-                  <span class="k">TILT ANGLE</span>
-                  <span class="v" id="hud-tilt">0.0°</span>
-                </div>
+            <div class="hud-stat-group">
+              <div class="hud-item">
+                <span class="k">TARGET DIST</span>
+                <span class="v amber" id="hud-dist-tgt">5.50 m</span>
+              </div>
+              <div class="hud-item">
+                <span class="k">L1 RESIDUAL</span>
+                <span class="v" id="hud-l1-force">0.0 N</span>
+              </div>
+              <div class="hud-item">
+                <span class="k">TILT ANGLE</span>
+                <span class="v" id="hud-tilt">0.0°</span>
               </div>
             </div>
           </div>
@@ -1498,8 +1522,6 @@
     function setHudMode(enabled) {
       isHudEnabled = enabled;
       if (hudSwitch) hudSwitch.checked = enabled;
-      const bottomTelem = document.getElementById("hud-bottom-telemetry");
-      if (bottomTelem) bottomTelem.style.display = enabled ? "block" : "none";
 
       if (enabled) {
         if (hudLabel) { hudLabel.style.color = "var(--cyan-bright)"; hudLabel.style.fontWeight = "700"; }
