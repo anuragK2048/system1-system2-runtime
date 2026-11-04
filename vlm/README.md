@@ -1,199 +1,140 @@
-# Local VLM Testing for Skydio X2 (Qwen2.5-VL)
+# Multimodal Vision-Language Model (VLM) Flight Reasoning & Navigation System
 
-This directory provides standalone scripts to test **local multimodal vision-language models** (specifically **Qwen2.5-VL-3B**) using actual onboard FPV camera frames rendered from your MuJoCo simulation.
+This directory houses the **Multimodal Vision-Language Reasoning Engine (System 2)** for autonomous drone operations. It couples high-frequency reflex control (500 Hz System 1) with high-level cognitive scene understanding, spatial navigation, and physical anomaly rejection using vision models (Google Gemini 3.5 Flash-Lite / Gemini 3.8 Live, local Qwen2.5-VL via Ollama / Apple Silicon MLX, or dedicated serverless Modal L4 GPUs).
 
 ---
 
-## Directory Structure
+## Directory Layout
 
 ```
 vlm/
-├── hud_overlay.py          # High-performance calibrated HUD projection helper (ground rings, horizon, 3D apertures)
-├── demo_hud_projection.py  # Visual demonstrator producing neutral, pitched, and banked FPV frames
-├── demo_outputs/           # Rendered demonstration frames with burned HUD overlays
-├── grab_sample_frame.py    # Renders calibrated 480x360 FPV frame from assets/skydio_x2/dual_scene.xml
-├── sample_fpv.jpg          # Generated test frame with metric rings, horizon, and flight telemetry
-├── evaluate_model.py       # Automated benchmark evaluator across test suites
-├── generate_test_suite.py  # Canonical 6 test cases (TC-01..06) generator
-├── generate_new_test_suite.py # Out-of-sample 6 test cases (TC-07..12) generator
-├── test_gemini_vlm.py      # Cloud test runner for Google Gemini Flash Lite
-├── test_qwen_ollama.py     # Tests Qwen2.5-VL via local Ollama OpenAI-compatible API
-├── test_qwen_mlx.py        # Tests Qwen2.5-VL via Apple Silicon native MLX-VLM (sub-300ms)
-├── test_cloud_vlm.py       # Tests Fireworks / OpenAI vision models
-├── modal_qwen_vlm.py       # Dedicated serverless L4 GPU app for Modal
-├── test_modal_client.py    # Client for querying deployed Modal endpoint
-└── README.md               # This guide
+├── hud_overlay.py               # Avionics HUD engine (ground rings, pitch ladder, 3D apertures)
+├── evaluate.py                  # Unified benchmark CLI (--suite single|canonical|new)
+├── evaluate_target_navigation.py# Evaluator for single-drone target navigation (SD-01..14)
+├── evaluate_model.py            # Evaluator for dual-drone disturbance suites (TC-01..12)
+├── gemini_live_client.py        # Bidirectional streaming WebSocket client for Gemini Live
+├── demo_hud_projection.py       # Demonstrator producing neutral, pitched, banked HUD frames
+├── demo_outputs/                # Rendered visual proof frames with HUD overlays
+├── grab_sample_frame.py         # Captures calibrated 480x360 FPV frame from MuJoCo scene
+├── sample_fpv.jpg               # Standard test frame with burned avionics HUD
+├── reference_views/             # Canonical arena FPV references (runway, window, arch)
+├── scratch/                     # Transient verification frames and test outputs
+│
+├── test_cases_single.json       # Active Single-Drone benchmark suite (SD-01..14)
+├── test_cases_single/           # Rendered FPV frames for single-drone targets
+├── test_cases.json              # Canonical dual-drone disturbance suite (TC-01..06)
+├── test_cases/                  # FPV frames for TC-01..06
+├── test_cases_new.json          # Out-of-sample generalization suite (TC-07..12)
+├── test_cases_new/              # FPV frames for TC-07..12
+│
+├── generate_single_drone_suite.py # Generates SD-01..14 test dataset & images
+├── generate_test_suite.py       # Generates TC-01..06 test dataset & images
+├── generate_new_test_suite.py   # Generates TC-07..12 test dataset & images
+│
+├── test_gemini_vlm.py           # Quick cloud test runner for Gemini Flash-Lite
+├── test_gemini_live.py          # Quick WebSocket test runner for Gemini Live
+├── test_qwen_ollama.py          # Local test runner for Ollama Qwen2.5-VL
+├── test_qwen_mlx.py             # Local test runner for Apple Silicon MLX-VLM
+├── test_cloud_vlm.py            # Test runner for Fireworks / OpenAI vision models
+├── modal_qwen_vlm.py            # Serverless Nvidia L4 GPU deployment on Modal
+├── test_modal_client.py         # Client for deployed Modal service
+├── TEST_CASES.md                # Comprehensive specification of all test suites
+└── README.md                    # This technical reference
 ```
 
 ---
 
-## Option 1: Test via Ollama (Zero Setup — Recommended First Step)
+## 1. Unified Benchmark Evaluation CLI
 
-Ollama is already installed and running on your Mac. It provides an OpenAI-compatible HTTP endpoint at `http://localhost:11434/v1`.
+The unified test runner evaluates any model across all three benchmark suites:
 
-### Step 1: Pull the Qwen2.5-VL Model
-Open a terminal and download the lightweight 3B model (or 7B):
 ```bash
-# Recommended 3B model (fastest inference, ~2.5 GB footprint)
-ollama pull qwen2.5vl:3b
+# Verify Ground Truth on Active Single-Drone Suite (SD-01..14)
+uv run python vlm/evaluate.py --suite single --backend ground_truth
 
-# Or standard 7B model (~5.5 GB footprint)
-ollama pull qwen2.5vl
-```
+# Evaluate Google Gemini on Single-Drone Suite
+uv run python vlm/evaluate.py --suite single --backend gemini
 
-### Step 2: Render a Fresh FPV Frame from MuJoCo
-```bash
-uv run python vlm/grab_sample_frame.py
-```
-*This generates `vlm/sample_fpv.jpg` (480×360 px with boresight reticle and altitude HUD) directly from `assets/skydio_x2/dual_scene.xml`.*
+# Evaluate Gemini Live over WebSockets
+uv run python vlm/evaluate.py --suite single --backend gemini-live
 
-### Step 3: Run the Inference Test
-```bash
-uv run python vlm/test_qwen_ollama.py
-```
+# Evaluate Local Ollama Qwen2.5-VL
+uv run python vlm/evaluate.py --suite single --backend ollama --model qwen2.5vl:3b
 
-### Optional Flags:
-```bash
-# Stream the tokens in real time to measure Time-To-First-Token (TTFT):
-uv run python vlm/test_qwen_ollama.py --stream
+# Evaluate Canonical Dual-Drone Disturbance Suite (TC-01..06)
+uv run python vlm/evaluate.py --suite canonical --backend ground_truth
 
-# Custom flight instruction:
-uv run python vlm/test_qwen_ollama.py --instruction "Identify the cyan landing pad, approach it and descend to 0.5m"
-
-# Test 7B model:
-uv run python vlm/test_qwen_ollama.py --model qwen2.5vl
+# Evaluate Out-of-Sample Generalization Suite (TC-07..12)
+uv run python vlm/evaluate.py --suite new --backend ground_truth
 ```
 
 ---
 
-## Option 2: Test via Apple Silicon Native MLX-VLM (Lowest Latency: 180–300 ms)
+## 2. Dedicated Single-Drone Navigation Dashboard (Port 8080)
 
-For maximum speed directly on Apple Silicon Metal GPU unified memory:
+To launch the real-time simulation cockpit with live FPV video streaming, interactive target navigation (Pad Alpha, Pedestal Delta, Window, Arch), chaos injection, and asynchronous Gemini VLM reasoning:
 
-### Step 1: Install MLX-VLM
 ```bash
-uv pip install mlx-vlm
+uv run python scripts/run_navigation_dashboard.py
 ```
 
-### Step 2: Run the MLX Test
-```bash
-uv run python vlm/test_qwen_mlx.py
-```
-*The script automatically downloads `mlx-community/Qwen2.5-VL-3B-Instruct-4bit` from Hugging Face on first run and benchmarks raw Metal GPU execution time.*
+- Open in browser: `http://localhost:8080`
+- **Port Isolation**: Runs on port 8080 to avoid conflicts with the legacy port 8000 dual-drone server.
+- **MJPEG FPV Stream**: Smooth 15–20 FPS video with burned HUD ground rings and artificial horizon (`/api/navigation/stream`).
+- **Telemetry WebSocket**: 40 Hz real-time flight telemetry, motor thrusts, and event logs (`/ws/navigation`).
+- **REST Control**: Trigger targets (`POST /api/navigation/target`), inject wind/motor faults (`POST /api/navigation/chaos`), toggle autonomous VLM navigation (`POST /api/navigation/vlm/toggle`).
 
 ---
 
-## Calibrated HUD Projection & Spatial Grounding (`vlm/hud_overlay.py`)
+## 3. Calibrated HUD Projection Engine (`vlm/hud_overlay.py`)
 
-Raw camera pixels are prone to depth ambiguity and scale confusion for Vision-Language Models. The **`HUDProjector`** burns perspective-accurate metric ground rings, an artificial horizon, and 3D passage aperture frames directly onto the FPV image before feeding it to the VLM:
+Raw camera pixels are prone to scale ambiguity for Vision-Language Models. The **`HUDProjector`** burns perspective-accurate avionics cues directly onto the FPV image before feeding it to the VLM:
 
-### Key Capabilities:
-1. **Metric Ground Rings (1m, 2m, 3m, 4m)**:
-   - Projects concentric circles on the ground plane ($Z=0$) centered at the drone's nadir projection.
-   - Handled with near-plane line clipping ($Z_c \le 0.05$m) to prevent perspective inversion.
-   - Distance labels (`"1m"`, `"2m"`, `"3m"`) burned along the flightpath corridor.
+1. **Concentric Metric Ground Rings (1m, 2m, 3m, 4m)**:
+   - Ground plane projections centered beneath the drone nadir.
+   - Near-plane line clipping prevents perspective inversion behind the camera lens.
 2. **Artificial Horizon & Pitch Ladder**:
-   - Calculated analytically from camera rotation matrix (`cam_xmat`):
-     $$\frac{\text{right}_z}{f_x}(u - c_x) - \frac{\text{up}_z}{f_y}(v - c_y) + \text{forward}_z = 0$$
-   - Displays boresight aircraft reticle and pitch ladder ticks at $\pm 10^\circ, \pm 20^\circ$.
-3. **3D Portals, Apertures & Gates (Doors, Windows, Arches, Hoops)**:
-   - Extensible `Aperture3D` data class defining arbitrary 3D openings.
-   - Automatically projects outer frame, inner rotor-clearance green envelope, central bullseye reticle, and 3D approach glidepath vector.
-   - Auto-discovers obstacles from MuJoCo bodies/sites matching `gate_*`, `door_*`, `window_*`, `arch_*`.
+   - Analytically derived from camera rotation matrix (`cam_xmat`) with $\pm 10^\circ, \pm 20^\circ$ pitch rungs.
+3. **3D Portals, Apertures & Gates (Windows, Arches, Hoops)**:
+   - Dynamic 3D bounding wireframes with inner rotor-clearance envelopes, bullseyes, and glidepath alignment cues.
 4. **Flight Telemetry Ribbon**:
-   - Displays real-time altitude, airspeed, pitch, roll, and heading.
+   - In-image altitude, airspeed, pitch, roll, and heading indicators.
 
-### Run the Visual Demonstrator:
+To render sample demonstration frames:
 ```bash
 uv run python vlm/demo_hud_projection.py
 ```
-Outputs are saved to `vlm/demo_outputs/`:
-- `demo_hud_neutral.jpg`: Neutral hover facing an Arch Gate at $X=2.5$m.
-- `demo_hud_pitch_down.jpg`: Pitched forward flight ($-12^\circ$ pitch) facing an elevated Window Aperture.
-- `demo_hud_banked.jpg`: Banked turn ($+18^\circ$ roll) facing a Doorway with clearance margin.
-
-### Performance:
-- Pure vector projection + PIL rendering executes in **~3.5 ms (280+ FPS)**, seamlessly fitting within the 1–5 Hz System 2 loop without impacting the 500 Hz reflex controller.
+Output images are stored in `vlm/demo_outputs/`.
 
 ---
 
-## Expected Output
+## 4. Local VLM Inference Backends
 
-When running either test script, you will see the benchmark banner and the unified JSON response:
+### Option A: Local Ollama (Zero Setup)
+```bash
+# Pull model
+ollama pull qwen2.5vl:3b
 
-```text
-==========================================================================
-🚁 [TESTING LOCAL VLM] Model: qwen2.5vl:3b @ http://localhost:11434/v1
-📸 Image Input: vlm/sample_fpv.jpg (480x360 FPV frame)
-🎯 Instruction: 'Proceed forward along the flight corridor toward the target pad, stay centered, and hold 1.0m altitude.'
-==========================================================================
-⚡ [LATENCY RESULTS] Total Latency: 0.28s (280 ms)
-⏱️ Time-To-First-Token (TTFT): 0.142s (142 ms)
-==========================================================================
-✅ [JSON PARSE SUCCESS] Verified Structured Payload:
-{
-  "diagnosis": "Corridor clear ahead. Target pad detected at center-ground. Minor leftward drift.",
-  "waypoint_command": {
-    "mode": "relative_body",
-    "target": [1.2, 0.0, 0.0],
-    "yaw_deg": 0.0,
-    "max_velocity": 1.0,
-    "corridor_width": 0.6
-  },
-  "feedforward_force_offset": [0.0, 0.0, 0.0],
-  "gain_multipliers": {
-    "pos_kp": 1.0,
-    "pos_kd": 1.0,
-    "att_kp": 1.0,
-    "att_kd": 1.0
-  },
-  "motor_trim_scale": [1.0, 1.0, 1.0, 1.0],
-  "safety_envelope": {
-    "max_tilt_deg": 20.0
-  }
-}
---------------------------------------------------------------------------
-  • Waypoint Command: ✅ PRESENT
-  • Feedforward Force: ✅ PRESENT
-  • Motor Trim Scale: ✅ PRESENT
-  • Gain Multipliers: ✅ PRESENT
-==========================================================================
+# Run inference test
+uv run python vlm/test_qwen_ollama.py
 ```
 
-This confirms:
-1. The local model successfully parses the FPV image.
-2. It outputs both the high-level **`waypoint_command`** for navigation AND the low-level **physical levers** (`feedforward_force_offset`, `motor_trim_scale`, `gain_multipliers`) for recovery.
-3. Latency stays within the required **200–500 ms** budget for closed-loop System 2 control.
+### Option B: Apple Silicon Native MLX-VLM (Lowest Latency: 180–300 ms)
+```bash
+uv pip install mlx-vlm
+uv run python vlm/test_qwen_mlx.py
+```
 
+### Option C: Google Gemini Live Streaming API
+```bash
+# Ensure GEMINI_API_KEY is present in your .env
+uv run python vlm/test_gemini_live.py
+```
 
----
-
-## Option 3: Deploy Dedicated Serverless GPU on Modal ($100 Hackathon Credits)
-
-> [!IMPORTANT]
-> **Zero Shared Endpoints:** This deployment uses a **dedicated Nvidia L4 GPU** (`gpu="L4"`, 24GB VRAM) billed strictly per GPU-second against your free $100 Meta Hackathon credits. It does NOT use Modal's pay-per-token managed endpoints.
-> - Automatically scales down to 0 replicas after 5 minutes idle (costs **$0.00** when not flying).
-> - Typical remote inference latency: **~180–280 ms**.
-
-### Step 1: Authenticate with Modal
+### Option D: Dedicated Serverless Nvidia L4 GPU on Modal
 ```bash
 uv run modal setup
-```
-*(Follow the browser prompt to authorize your account)*
-
-### Step 2: Run a One-Off Remote Test on the L4 GPU
-```bash
 uv run modal run vlm/modal_qwen_vlm.py
-```
-
-### Step 3: Deploy Persistent Web Endpoint
-```bash
 uv run modal deploy vlm/modal_qwen_vlm.py
-```
-*Modal will print your public HTTPS endpoint URL:*
-`https://<your-username>--drone-qwen-vlm-dronevlmservice-predict.modal.run`
-
-### Step 4: Query the Deployed Endpoint
-```bash
-uv run python vlm/test_modal_client.py --url https://<your-endpoint-url>
+uv run python vlm/test_modal_client.py --url <YOUR_MODAL_URL>
 ```

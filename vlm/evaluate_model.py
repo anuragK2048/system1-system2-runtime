@@ -215,25 +215,33 @@ def run_evaluator(backend="ground_truth", model=None, test_file="vlm/test_cases.
         if backend == "ground_truth":
             # Synthesize ideal ground truth response
             gt = tc["ground_truth"]
-            dx = (gt["waypoint_command"]["target_dx_range"][0] + gt["waypoint_command"]["target_dx_range"][1]) / 2
-            dy = (gt["waypoint_command"]["target_dy_range"][0] + gt["waypoint_command"]["target_dy_range"][1]) / 2
-            # For lateral evasion where both +/- are acceptable, pick positive bypass (+0.6m)
-            if tc_id == "TC-06":
-                dy = 0.65
-            dz = (gt["waypoint_command"]["target_dz_range"][0] + gt["waypoint_command"]["target_dz_range"][1]) / 2
+            gt_wp = gt["waypoint_command"]
+            if "target" in gt_wp:
+                target_vec = list(gt_wp["target"])
+                yaw_deg = float(gt_wp.get("yaw_deg", 0.0))
+            else:
+                dx = (gt_wp["target_dx_range"][0] + gt_wp["target_dx_range"][1]) / 2
+                dy = (gt_wp["target_dy_range"][0] + gt_wp["target_dy_range"][1]) / 2
+                # For lateral evasion where both +/- are acceptable, pick positive bypass (+0.6m)
+                if tc_id == "TC-06":
+                    dy = 0.65
+                dz = (gt_wp["target_dz_range"][0] + gt_wp["target_dz_range"][1]) / 2
+                target_vec = [dx, dy, dz]
+                yaw_deg = 0.0
+
             ideal_patch = {
                 "diagnosis": f"Ground truth response for {tc_name}",
                 "waypoint_command": {
                     "mode": "relative_body",
-                    "target": [dx, dy, dz],
-                    "yaw_deg": 0.0,
-                    "max_velocity": 1.0,
-                    "corridor_width": 0.6
+                    "target": target_vec,
+                    "yaw_deg": yaw_deg,
+                    "max_velocity": float(gt_wp.get("max_velocity", 1.0)),
+                    "corridor_width": float(gt_wp.get("corridor_width", 0.6))
                 },
                 "feedforward_force_offset": gt["feedforward_force_offset"],
                 "gain_multipliers": gt["gain_multipliers"],
                 "motor_trim_scale": gt["motor_trim_scale"],
-                "safety_envelope": {"max_tilt_deg": 20.0}
+                "safety_envelope": gt.get("safety_envelope", {"max_tilt_deg": 20.0})
             }
             raw_json_str = json.dumps(ideal_patch)
             latency_s = 0.001

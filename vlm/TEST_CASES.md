@@ -1,215 +1,131 @@
 # Autonomous Flight VLM Benchmark: Test Suite & Ground Truth Reference
 
-This benchmark evaluates any Multimodal Vision-Language Model (VLM) acting as the **System-2 Cognitive Reasoner** for the Skydio X2 quadrotor.
+This benchmark evaluates any Multimodal Vision-Language Model (VLM) acting as the **System-2 Cognitive Reasoner** for the Skydio X2 quadrotor in MuJoCo simulation.
 
-It tests whether the model can simultaneously:
-1. **Understand FPV visual scenes** (corridors, landing pads, obstacle proximity).
+It assesses whether the vision-language model can simultaneously:
+1. **Perceive FPV visual scenes** (metric HUD rings, horizon ladder, landing pads, obstacle pylons, 3D aperture gates).
 2. **Translate mission instructions into 3D navigation waypoints** (`waypoint_command`).
-3. **Reject physical chaos & actuator degradation** (`feedforward_force_offset`, `motor_trim_scale`, `gain_multipliers`, `safety_envelope`).
+3. **Reject physical chaos & actuator anomalies** (`feedforward_force_offset`, `motor_trim_scale`, `gain_multipliers`, `safety_envelope`).
 
 ---
 
-## The 6 Canonical Test Cases
+## Benchmark Suites Overview
 
-### 1. TC-01: Corridor Forward Advance (Visual Navigation)
-* **Objective:** Test nominal forward navigation through an unobstructed corridor.
-* **FPV Image:** [`vlm/test_cases/tc_01_corridor_advance.jpg`](file:///Users/anuragkodle/Desktop/meta-hackathon/system1-system2-runtime/vlm/test_cases/tc_01_corridor_advance.jpg) (clear runway extending into distance, altitude 1.0m, zero obstacles).
-* **Telemetry Input:**
-  * Altitude: $1.00\text{ m}$
-  * Velocity: $[+0.02, -0.01, 0.00]\text{ m/s}$ (calm hover)
-  * Attitude: $\text{Roll}=0.0^\circ, \text{Pitch}=0.0^\circ, \text{Yaw}=0.0^\circ$
-  * Disturbance Force: $[0.0, 0.0, 0.0]\text{ N}$
-* **Mission Instruction:** *"Proceed forward along the flight corridor toward the target pad, stay centered, and hold 1.0m altitude."*
-* **Ground Truth Answer:**
-  ```json
-  {
-    "diagnosis": "Flight corridor clear ahead. Maintaining centered nominal advance.",
-    "waypoint_command": {
-      "mode": "relative_body",
-      "target": [1.5, 0.0, 0.0],
-      "yaw_deg": 0.0,
-      "max_velocity": 1.0,
-      "corridor_width": 0.6
-    },
-    "feedforward_force_offset": [0.0, 0.0, 0.0],
-    "gain_multipliers": {"pos_kp": 1.0, "pos_kd": 1.0, "att_kp": 1.0, "att_kd": 1.0},
-    "motor_trim_scale": [1.0, 1.0, 1.0, 1.0],
-    "safety_envelope": {"max_tilt_deg": 20.0}
-  }
-  ```
-* **Validation Rules:**
-  * $dx \in [0.8, 3.0]\text{ m}$ (forward progress).
-  * $|dy| \le 0.3\text{ m}$ (centered in corridor).
-  * Feedforward force must be $\approx [0, 0, 0]\text{ N}$ (no phantom force during calm flight).
+| Suite Identifier | Description | Cases | Target Application |
+|---|---|---|---|
+| **`single`** (Default) | Single-Drone Target Navigation & Visual Servoing | **SD-01 to SD-14** | Autonomous target acquisition (Pad Alpha, Pedestal Delta, Apertures, Chaos rejection) |
+| **`canonical`** | Dual-Drone Canonical Disturbance & Evasion | **TC-01 to TC-06** | Baseline flight corridor navigation, wind rejection, motor trim, obstacle bypass |
+| **`new`** | Out-of-Sample Generalization Benchmark | **TC-07 to TC-12** | Curved corridors, touchdown descent, pendulum chatter, forward transit motor fault |
 
 ---
 
-### 2. TC-02: Target Pad Approach & Centering (Visual Servoing)
-* **Objective:** Test landing pad visual acquisition and simultaneous 3D descent/approach.
-* **FPV Image:** [`vlm/test_cases/tc_02_target_pad_approach.jpg`](file:///Users/anuragkodle/Desktop/meta-hackathon/system1-system2-runtime/vlm/test_cases/tc_02_target_pad_approach.jpg) (orange landing pad visible ahead at front-right bearing).
-* **Telemetry Input:**
-  * Altitude: $0.85\text{ m}$
-  * Velocity: $[+0.15, +0.05, -0.05]\text{ m/s}$
-  * Attitude: $\text{Roll}=0.2^\circ, \text{Pitch}=-1.5^\circ, \text{Yaw}=-115.0^\circ$
-* **Mission Instruction:** *"Align with the orange target pad, center it in your crosshairs, and descend to 0.4m."*
-* **Ground Truth Answer:**
-  ```json
-  {
-    "diagnosis": "Target pad detected in front-right sector. Aligning heading and commanding descent to 0.4m.",
-    "waypoint_command": {
-      "mode": "relative_body",
-      "target": [0.8, 0.0, -0.45],
-      "yaw_deg": 0.0,
-      "max_velocity": 0.8,
-      "corridor_width": 0.6
-    },
-    "feedforward_force_offset": [0.0, 0.0, 0.0],
-    "gain_multipliers": {"pos_kp": 1.0, "pos_kd": 1.0, "att_kp": 1.0, "att_kd": 1.0},
-    "motor_trim_scale": [1.0, 1.0, 1.0, 1.0],
-    "safety_envelope": {"max_tilt_deg": 20.0}
-  }
-  ```
-* **Validation Rules:**
-  * $dz \in [-0.6, -0.2]\text{ m}$ (must command negative vertical displacement toward 0.4m target).
-  * $dx \in [0.2, 2.0]\text{ m}$ (advances toward pad).
+## Suite 1: Single-Drone Target Navigation (SD-01 to SD-14)
+
+### SD-01: Nominal Pad Alpha Hover & Alignment
+- **Category:** Visual Navigation & Alignment
+- **Instruction:** *"Maintain nominal flight alignment toward Target Pad Alpha along the forward corridor, hold 1.0m altitude, and advance smoothly."*
+- **Key Criterion:** Advances forward along runway corridor ($dx \in [0.8, 1.8]\text{ m}, |dy| \le 0.2\text{ m}$), holding nominal $1.0\text{ m}$ altitude.
+
+### SD-02: Delta: Navigate to Raised Disc Platform
+- **Category:** Elevated Target Acquisition
+- **Instruction:** *"Navigate forward onto Elevated Station Delta and command hover waypoint directly over the platform disc (clearance 0.35m above platform top)."*
+- **Key Criterion:** Commands forward climb onto elevated pedestal disc at $Z \approx 1.10\text{ m}$ ($dx \approx 1.8\text{ m}, dz \ge +0.05\text{ m}$).
+
+### SD-03: Lateral Offset to Target Pad Bravo
+- **Category:** Lateral Target Tracking
+- **Instruction:** *"Navigate toward Target Pad Bravo on the forward-left flank (Cyan / Blue multi-ring pad), adjusting heading and commanding left-lateral waypoint tracking."*
+- **Key Criterion:** Steers left toward Cyan pad ($dy \in [0.4, 1.5]\text{ m}, \text{yaw} > 0^\circ$).
+
+### SD-04: Lateral Offset to Target Pad Charlie
+- **Category:** Lateral Target Tracking
+- **Instruction:** *"Navigate toward Target Pad Charlie on the forward-right flank (Emerald green pad), adjusting heading and commanding right-lateral waypoint tracking."*
+- **Key Criterion:** Steers right toward Emerald pad ($dy \in [-1.5, -0.4]\text{ m}, \text{yaw} < 0^\circ$).
+
+### SD-05: Pylon Gate Obstacle Traversal
+- **Category:** Obstacle Traversal
+- **Instruction:** *"Traverse through the center of the pylon obstacle gate, hold zero lateral drift (stay centered between left and right pylons), and maintain 1.0m altitude."*
+- **Key Criterion:** Safe centerline traversal ($dx > 0.8\text{ m}, |dy| \le 0.15\text{ m}$) avoiding pylon collisions.
+
+### SD-06: Target Pad Alpha Station-Keeping under Wind Gust
+- **Category:** Disturbance Rejection
+- **Instruction:** *"Station-keep over Target Pad Alpha against strong headwind gust (+5.2N along +X). Inject opposing feedforward force to maintain position."*
+- **Key Criterion:** Opposing feedforward force $F_x \in [-5.5, -4.5]\text{ N}$, station-keeping drift $|dx| \le 0.2\text{ m}$.
+
+### SD-07: Degraded Motor Hover over Target Pad
+- **Category:** Actuator Failure Compensation
+- **Instruction:** *"Compensate for Motor 1 actuator degradation (40% power output) while holding hover over Target Pad Alpha. Apply motor trim scale and tighten safety tilt."*
+- **Key Criterion:** Motor 1 trim scale $\in [2.0, 2.5]\times$, safety tilt clamp $\le 18^\circ$.
+
+### SD-08: Alpha: Precision Hover Between 2 Runway Poles
+- **Category:** Runway Corridor Station-Keeping
+- **Instruction:** *"Hold precision station-keeping hover centered between the two runway poles (pylons at Y=±0.9m) framing Pad Alpha. Maintain 1.0m altitude, keep zero lateral drift (stay equidistant between poles at dy=0.0m), and hold station."*
+- **Key Criterion:** Dead-center lateral hold ($|dy| \le 0.10\text{ m}$) centered at $Y=0.0\text{ m}$ between the dual runway pylons.
+
+### SD-09: Delta: Precision Station-Keeping Atop Raised Disc Platform
+- **Category:** Elevated Platform Station-Keeping
+- **Instruction:** *"Maintain precision station-keeping hover directly atop Elevated Pedestal Delta (centered over the yellow caution disc). Hold 1.10m altitude (0.40m clearance above platform disc) and zero horizontal drift."*
+- **Key Criterion:** Altitude hold over raised disc ($Z = 1.10\text{ m} \pm 0.05\text{ m}$) with tight horizontal position hold ($|dx|, |dy| \le 0.12\text{ m}$).
+
+### SD-10: Left Window Sector Scan (Unobservable Sector Saccade +90°)
+- **Category:** Active Perception Saccade
+- **Instruction:** *"Objective is Left Window located at Y=+5.0m in Sector Left. Current heading is 000° (window unobservable). Perform an active perception in-place yaw saccade to face Sector Left (+90°)."*
+- **Key Criterion:** In-place yaw command $\text{yaw\_deg} \in [+85^\circ, +95^\circ]$, position displacement $\approx [0, 0, 0]\text{ m}$.
+
+### SD-11: Left Window Aperture Ingress
+- **Category:** Aperture Traversal
+- **Instruction:** *"Traverse forward through the Left Window aperture opening at Z=1.10m. Maintain tight attitude safety tilt envelope (max 12.0°) and approach velocity (0.6 m/s) to pass safely within the inner clearance frame."*
+- **Key Criterion:** Target aligns with window aperture center ($Z \approx 1.10\text{ m}$), conservative speed ($v \le 0.7\text{ m/s}$), and tight safety envelope ($\text{max\_tilt} \le 15^\circ$).
+
+### SD-12: Right Arch Sector Scan (Unobservable Sector Saccade -90°)
+- **Category:** Active Perception Saccade
+- **Instruction:** *"Objective is Right Arch located at Y=-5.0m in Sector Right. Current heading is 000° (arch unobservable). Perform an active perception in-place yaw saccade to face Sector Right (-90°)."*
+- **Key Criterion:** In-place yaw command $\text{yaw\_deg} \in [-95^\circ, -85^\circ]$, position displacement $\approx [0, 0, 0]\text{ m}$.
+
+### SD-13: Right Arch Aperture Ingress
+- **Category:** Aperture Traversal
+- **Instruction:** *"Traverse forward through the Right Arch aperture opening at Z=0.90m. Maintain tight attitude safety tilt envelope (max 12.0°) and approach velocity (0.6 m/s) to pass safely within the inner clearance frame."*
+- **Key Criterion:** Target aligns with arch portal center ($Z \approx 0.90\text{ m}$), conservative speed ($v \le 0.7\text{ m/s}$), and tight safety envelope ($\text{max\_tilt} \le 15^\circ$).
+
+### SD-14: Delta: Platform Station-Keeping under Crosswind
+- **Category:** Disturbance Rejection
+- **Instruction:** *"Maintain station-keeping hover atop Elevated Station Delta against a strong lateral crosswind disturbance (+4.8N along +Y). Inject opposing feedforward force to prevent drifting off the raised platform."*
+- **Key Criterion:** Lateral feedforward force $F_y \in [-5.2, -4.2]\text{ N}$, keeping the drone firmly planted atop the elevated disc.
 
 ---
 
-### 3. TC-03: Headwind Gust Compensation (Disturbance Rejection)
-* **Objective:** Test physical chaos compensation where external force pushes drone backward.
-* **FPV Image:** [`vlm/test_cases/tc_03_headwind_compensation.jpg`](file:///Users/anuragkodle/Desktop/meta-hackathon/system1-system2-runtime/vlm/test_cases/tc_03_headwind_compensation.jpg) (pitched nose-down into wind, ground drifting).
-* **Telemetry Input:**
-  * $L_1$ Disturbance Force: $\hat{\sigma}_f = [+5.2\text{ N}, 0.0\text{ N}, 0.0\text{ N}]$ (strong wind along $+X$)
-  * Velocity: $v_x = -0.35\text{ m/s}$ (drifting downwind)
-  * Pitch: $-14.0^\circ$
-* **Mission Instruction:** *"Hold station over current waypoint against headwind disturbance."*
-* **Ground Truth Answer:**
-  ```json
-  {
-    "diagnosis": "Strong headwind disturbance force (+5.2N along +X) detected. Tilting into wind with opposing feedforward offset.",
-    "waypoint_command": {
-      "mode": "relative_body",
-      "target": [0.0, 0.0, 0.0],
-      "yaw_deg": 0.0,
-      "max_velocity": 0.8,
-      "corridor_width": 0.6
-    },
-    "feedforward_force_offset": [-5.2, 0.0, 0.0],
-    "gain_multipliers": {"pos_kp": 1.2, "pos_kd": 1.0, "att_kp": 1.0, "att_kd": 1.0},
-    "motor_trim_scale": [1.0, 1.0, 1.0, 1.0],
-    "safety_envelope": {"max_tilt_deg": 25.0}
-  }
-  ```
-* **Validation Rules:**
-  * $dF_x \in [-5.5, -4.5]\text{ N}$ (**Crucial:** Must command negative feedforward force to tilt into wind!).
-  * $dx \approx 0.0\text{ m}$ (holds waypoint station rather than running away).
+## Suite 2: Canonical Dual-Drone Benchmark (TC-01 to TC-06)
+
+1. **TC-01: Corridor Forward Advance:** Clear corridor nominal advance ($dx \in [0.8, 3.0]\text{ m}, |dy| \le 0.3\text{ m}$).
+2. **TC-02: Target Pad Approach & Centering:** Visual servoing onto landing pad ($dz \in [-0.6, -0.2]\text{ m}$).
+3. **TC-03: Headwind Gust Compensation:** Rejection of $+5.2\text{ N}$ headwind via opposing feedforward ($F_x \in [-5.5, -4.5]\text{ N}$).
+4. **TC-04: Motor 1 Degradation Recovery:** Chipped rotor recovery ($\text{Trim}_{M1} \in [2.0, 2.5]\times$, tilt clamp $\le 20^\circ$).
+5. **TC-05: Gyro Chatter & Noise Damping:** High-frequency vibration damping (`att_kd` $\ge 1.4\times$, `att_kp` $\le 0.5\times$).
+6. **TC-06: Corridor Obstacle Evasion:** Steering around stationary obstacle dead ahead ($|dy| \ge 0.35\text{ m}$).
 
 ---
 
-### 4. TC-04: Motor 1 Degradation Recovery (Actuator Failure)
-* **Objective:** Compensate for a chipped propeller or degraded motor (Motor 1 at 40% power).
-* **FPV Image:** [`vlm/test_cases/tc_04_motor1_failure_recovery.jpg`](file:///Users/anuragkodle/Desktop/meta-hackathon/system1-system2-runtime/vlm/test_cases/tc_04_motor1_failure_recovery.jpg) (slight roll tilt, torque imbalance).
-* **Telemetry Input:**
-  * Motor Thrusts: $M_1 = 5.80\text{ N}$ vs $M_2..M_4 \approx 2.90\text{ N}$ (Motor 1 saturated/failing)
-  * Disturbance Moment: $\hat{\sigma}_M = [0.18, 0.22, 0.05]\text{ N}\cdot\text{m}$
-* **Mission Instruction:** *"Diagnose flight anomaly, compensate actuator degradation, and maintain stable hover."*
-* **Ground Truth Answer:**
-  ```json
-  {
-    "diagnosis": "Motor 1 failure/degradation detected (40% thrust deficit). Applying 2.5x trim to restore M1 effective output.",
-    "waypoint_command": {
-      "mode": "relative_body",
-      "target": [0.0, 0.0, 0.0],
-      "yaw_deg": 0.0,
-      "max_velocity": 0.6,
-      "corridor_width": 0.6
-    },
-    "feedforward_force_offset": [0.0, 0.0, 0.0],
-    "gain_multipliers": {"pos_kp": 1.0, "pos_kd": 1.0, "att_kp": 1.0, "att_kd": 1.0},
-    "motor_trim_scale": [2.5, 1.0, 1.0, 1.0],
-    "safety_envelope": {"max_tilt_deg": 18.0}
-  }
-  ```
-* **Validation Rules:**
-  * $\text{Trim}_{M1} \in [2.0, 2.5]\times$ (restores M1 output).
-  * $\text{max\_tilt\_deg} \le 20.0^\circ$ (tightens envelope to prevent rollover).
+## Suite 3: Generalization Dual-Drone Benchmark (TC-07 to TC-12)
+
+1. **TC-07: Right-Turn Corridor Junction:** Following a curving flight corridor to the right ($dx \ge 0.8\text{ m}, \text{yaw} > 0^\circ$).
+2. **TC-08: Lateral Crosswind (+Y Disturbance):** Compensating for $+Y$ crosswind ($F_y \in [-5.5, -4.5]\text{ N}$).
+3. **TC-09: Cyan Landing Pad Touchdown:** Low-altitude touchdown descent to $Z = 0.15\text{ m}$ ($dz \le -0.4\text{ m}$).
+4. **TC-10: Payload Pendulum Oscillation:** Damping sloshing/pendulum disturbance chatter (`att_kd` boost).
+5. **TC-11: Motor 1 Fail during Forward Transit:** Motor failure recovery while simultaneously progressing forward.
+6. **TC-12: Left Shoulder Obstacle Bypass:** Lateral bypass around an obstacle encroaching the left flight lane.
 
 ---
 
-### 5. TC-05: Gyro Chatter & Noise Damping (Sensor Anomaly)
-* **Objective:** Suppress high-frequency vibration/chatter without false-alarm force offsets.
-* **FPV Image:** [`vlm/test_cases/tc_05_gyro_chatter_damping.jpg`](file:///Users/anuragkodle/Desktop/meta-hackathon/system1-system2-runtime/vlm/test_cases/tc_05_gyro_chatter_damping.jpg).
-* **Telemetry Input:**
-  * Gyro RMS: $\omega_x = 1.45\text{ rad/s}, \omega_y = 1.38\text{ rad/s}$ (severe angular rate chatter)
-  * Disturbance Force: $0.1\text{ N}$ (negligible force)
-  * `oscillation_detected: true`
-* **Mission Instruction:** *"Damp high-frequency vibration chatter and hold altitude."*
-* **Ground Truth Answer:**
-  ```json
-  {
-    "diagnosis": "High-frequency gyro chatter detected. Increasing derivative damping (att_kd) and softening proportional gain (att_kp).",
-    "waypoint_command": {
-      "mode": "relative_body",
-      "target": [0.0, 0.0, 0.0],
-      "yaw_deg": 0.0,
-      "max_velocity": 0.8,
-      "corridor_width": 0.6
-    },
-    "feedforward_force_offset": [0.0, 0.0, 0.0],
-    "gain_multipliers": {"pos_kp": 1.0, "pos_kd": 1.0, "att_kp": 0.4, "att_kd": 1.6},
-    "motor_trim_scale": [1.0, 1.0, 1.0, 1.0],
-    "safety_envelope": {"max_tilt_deg": 20.0}
-  }
-  ```
-* **Validation Rules:**
-  * `att_kd` $\ge 1.4\times$ (boosts angular rate damping).
-  * `att_kp` $\le 0.5\times$ (softens proportional gain).
-  * Feedforward force must remain zero (rejects false alarm).
+## Execution Guide
 
----
-
-### 6. TC-06: Corridor Obstacle Evasion (Spatial Evasion)
-* **Objective:** Detect an obstacle directly blocking the corridor in the FPV view and command lateral evasion.
-* **FPV Image:** [`vlm/test_cases/tc_06_corridor_obstacle_evasion.jpg`](file:///Users/anuragkodle/Desktop/meta-hackathon/system1-system2-runtime/vlm/test_cases/tc_06_corridor_obstacle_evasion.jpg) (Drone 1 parked directly in Drone 2's sightline at 1.1m distance; clear airspace on left/right).
-* **Telemetry Input:**
-  * Proximity warning: *"Obstacle detected dead-ahead at 1.1m distance."*
-* **Mission Instruction:** *"Proceed down the corridor, avoid the blocking obstacle directly ahead by steering around it into clear space."*
-* **Ground Truth Answer:**
-  ```json
-  {
-    "diagnosis": "Obstacle directly obstructing central flight corridor at 1.1m. Commanding lateral bypass waypoint into open airspace.",
-    "waypoint_command": {
-      "mode": "relative_body",
-      "target": [0.9, 0.65, 0.0],
-      "yaw_deg": 10.0,
-      "max_velocity": 0.8,
-      "corridor_width": 0.8
-    },
-    "feedforward_force_offset": [0.0, 0.0, 0.0],
-    "gain_multipliers": {"pos_kp": 1.0, "pos_kd": 1.0, "att_kp": 1.0, "att_kd": 1.0},
-    "motor_trim_scale": [1.0, 1.0, 1.0, 1.0],
-    "safety_envelope": {"max_tilt_deg": 20.0}
-  }
-  ```
-* **Validation Rules:**
-  * $|dy| \ge 0.35\text{ m}$ (must command significant lateral offset to clear obstacle).
-  * $dx \in [0.4, 2.0]\text{ m}$ (advances past the obstacle).
-
----
-
-## How to Run the Benchmark Evaluator
-
-### Run Ground-Truth Sanity Check:
 ```bash
-uv run python vlm/evaluate_model.py --backend ground_truth
-```
+# Run Ground Truth validation on all suites
+uv run python vlm/evaluate.py --suite single --backend ground_truth
+uv run python vlm/evaluate.py --suite canonical --backend ground_truth
+uv run python vlm/evaluate.py --suite new --backend ground_truth
 
-### Run Google Gemini 3.5 Flash-Lite:
-```bash
-uv run python vlm/evaluate_model.py --backend gemini
-```
+# Run Gemini 3.5 Flash-Lite against Single-Drone Suite
+uv run python vlm/evaluate.py --suite single --backend gemini
 
-### Run Local Ollama Qwen2.5-VL:
-```bash
-uv run python vlm/evaluate_model.py --backend ollama --model qwen2.5vl:3b
+# Run Gemini Live Streaming WebSocket against Single-Drone Suite
+uv run python vlm/evaluate.py --suite single --backend gemini-live
 ```

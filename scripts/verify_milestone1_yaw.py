@@ -86,7 +86,7 @@ def main():
         apertures=[window_aperture],
         radii=[1.0, 2.0, 3.0],
     )
-    output_dir = PROJECT_ROOT / "vlm"
+    output_dir = PROJECT_ROOT / "vlm" / "scratch"
     output_dir.mkdir(parents=True, exist_ok=True)
     before_path = output_dir / "verification_milestone1_before_turn.jpg"
     before_img.save(before_path, quality=92)
