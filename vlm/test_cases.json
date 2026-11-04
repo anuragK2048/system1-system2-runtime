@@ -1,0 +1,621 @@
+[
+  {
+    "id": "TC-01",
+    "name": "Corridor Forward Advance",
+    "category": "Visual Navigation",
+    "image_path": "vlm/test_cases/tc_01_corridor_advance.jpg",
+    "instruction": "Proceed forward along the flight corridor toward the target pad, stay centered, and hold 1.0m altitude.",
+    "telemetry": {
+      "altitude_m": 1.0,
+      "velocity_body_mps": [
+        0.02,
+        -0.01,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "gyro_rms_radps": [
+        0.12,
+        0.15,
+        0.08
+      ]
+    },
+    "ground_truth": {
+      "diagnosis_keyword": "corridor",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target_dx_range": [
+          1.0,
+          2.5
+        ],
+        "target_dy_range": [
+          -0.2,
+          0.2
+        ],
+        "target_dz_range": [
+          -0.1,
+          0.1
+        ],
+        "yaw_deg_range": [
+          -5.0,
+          5.0
+        ],
+        "max_velocity_range": [
+          0.8,
+          1.2
+        ]
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg_max": 25.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "range",
+        "min": 0.8,
+        "max": 3.0,
+        "desc": "Commands forward progress along corridor"
+      },
+      {
+        "field": "waypoint_command.target[1]",
+        "type": "abs_max",
+        "max": 0.3,
+        "desc": "Maintains lateral corridor centering"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "Does not inject phantom force during calm nominal flight"
+      },
+      {
+        "field": "motor_trim_scale",
+        "type": "ones_vector",
+        "desc": "Keeps nominal motor trim 1.0"
+      }
+    ]
+  },
+  {
+    "id": "TC-02",
+    "name": "Target Pad Approach & Centering",
+    "category": "Visual Servoing",
+    "image_path": "vlm/test_cases/tc_02_target_pad_approach.jpg",
+    "instruction": "Align with the orange target pad, center it in your crosshairs, and descend to 0.4m.",
+    "telemetry": {
+      "altitude_m": 0.85,
+      "velocity_body_mps": [
+        0.15,
+        0.05,
+        -0.05
+      ],
+      "attitude_deg": {
+        "roll": 0.2,
+        "pitch": -1.5,
+        "yaw": -115.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "gyro_rms_radps": [
+        0.14,
+        0.16,
+        0.09
+      ]
+    },
+    "ground_truth": {
+      "diagnosis_keyword": "target",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target_dx_range": [
+          0.4,
+          1.5
+        ],
+        "target_dy_range": [
+          -0.5,
+          0.5
+        ],
+        "target_dz_range": [
+          -0.5,
+          -0.3
+        ],
+        "yaw_deg_range": [
+          -30.0,
+          30.0
+        ],
+        "max_velocity_range": [
+          0.5,
+          1.0
+        ]
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg_max": 20.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.target[2]",
+        "type": "range",
+        "min": -0.6,
+        "max": -0.2,
+        "desc": "Commands descent toward 0.4m AGL target"
+      },
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "range",
+        "min": 0.2,
+        "max": 2.0,
+        "desc": "Advances toward landing pad in front of drone"
+      },
+      {
+        "field": "motor_trim_scale",
+        "type": "ones_vector",
+        "desc": "No actuator failure; trim remains 1.0"
+      }
+    ]
+  },
+  {
+    "id": "TC-03",
+    "name": "Headwind Gust Compensation",
+    "category": "Disturbance Rejection",
+    "image_path": "vlm/test_cases/tc_03_headwind_compensation.jpg",
+    "instruction": "Hold station over current waypoint against headwind disturbance.",
+    "telemetry": {
+      "altitude_m": 0.98,
+      "velocity_body_mps": [
+        -0.35,
+        0.01,
+        -0.02
+      ],
+      "attitude_deg": {
+        "roll": 0.1,
+        "pitch": -14.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        5.2,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.6,
+        3.6,
+        2.9,
+        2.9
+      ],
+      "gyro_rms_radps": [
+        0.22,
+        0.35,
+        0.12
+      ]
+    },
+    "ground_truth": {
+      "diagnosis_keyword": "wind",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target_dx_range": [
+          -0.2,
+          0.2
+        ],
+        "target_dy_range": [
+          -0.2,
+          0.2
+        ],
+        "target_dz_range": [
+          -0.1,
+          0.1
+        ],
+        "yaw_deg_range": [
+          -5.0,
+          5.0
+        ],
+        "max_velocity_range": [
+          0.5,
+          1.0
+        ]
+      },
+      "feedforward_force_offset": [
+        -5.2,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.2,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg_max": 25.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "feedforward_force_offset[0]",
+        "type": "range",
+        "min": -5.5,
+        "max": -4.5,
+        "desc": "Applies opposing feedforward force (-5.2N) against wind"
+      },
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "abs_max",
+        "max": 0.5,
+        "desc": "Holds station at waypoint rather than abandoning position"
+      },
+      {
+        "field": "gain_multipliers.pos_kp",
+        "type": "range",
+        "min": 1.0,
+        "max": 1.5,
+        "desc": "Maintains or increases position stiffness"
+      }
+    ]
+  },
+  {
+    "id": "TC-04",
+    "name": "Motor 1 Degradation Recovery",
+    "category": "Actuator Failure",
+    "image_path": "vlm/test_cases/tc_04_motor1_failure_recovery.jpg",
+    "instruction": "Diagnose flight anomaly, compensate actuator degradation, and maintain stable hover.",
+    "telemetry": {
+      "altitude_m": 0.95,
+      "velocity_body_mps": [
+        0.01,
+        -0.08,
+        -0.05
+      ],
+      "attitude_deg": {
+        "roll": 6.0,
+        "pitch": -2.0,
+        "yaw": 0.5
+      },
+      "unmodeled_force_disturbance_N": [
+        0.2,
+        0.1,
+        -1.9
+      ],
+      "unmodeled_moment_disturbance_Nm": [
+        0.18,
+        0.22,
+        0.05
+      ],
+      "motor_controls_N": [
+        5.8,
+        2.85,
+        2.9,
+        2.95
+      ],
+      "gyro_rms_radps": [
+        0.45,
+        0.52,
+        0.18
+      ]
+    },
+    "ground_truth": {
+      "diagnosis_keyword": "motor",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target_dx_range": [
+          -0.1,
+          0.1
+        ],
+        "target_dy_range": [
+          -0.1,
+          0.1
+        ],
+        "target_dz_range": [
+          -0.1,
+          0.1
+        ],
+        "yaw_deg_range": [
+          -5.0,
+          5.0
+        ],
+        "max_velocity_range": [
+          0.4,
+          0.8
+        ]
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        2.5,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg_max": 20.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "motor_trim_scale[0]",
+        "type": "range",
+        "min": 2.0,
+        "max": 2.5,
+        "desc": "Restores M1 thrust via 2.2-2.5x trim (or trims healthy motors)"
+      },
+      {
+        "field": "safety_envelope.max_tilt_deg",
+        "type": "range",
+        "min": 15.0,
+        "max": 22.0,
+        "desc": "Tightens tilt envelope to prevent spin during single-motor recovery"
+      }
+    ]
+  },
+  {
+    "id": "TC-05",
+    "name": "Gyro Chatter & Noise Damping",
+    "category": "Sensor Anomaly",
+    "image_path": "vlm/test_cases/tc_05_gyro_chatter_damping.jpg",
+    "instruction": "Damp high-frequency vibration chatter and hold altitude.",
+    "telemetry": {
+      "altitude_m": 1.0,
+      "velocity_body_mps": [
+        0.01,
+        0.02,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.5,
+        "pitch": -0.4,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.1,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "gyro_rms_radps": [
+        1.45,
+        1.38,
+        0.42
+      ],
+      "oscillation_detected": true,
+      "oscillation_note": "angular rate spike wx_rms=1.4rad/s, wy_rms=1.4rad/s"
+    },
+    "ground_truth": {
+      "diagnosis_keyword": "chatter",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target_dx_range": [
+          -0.1,
+          0.1
+        ],
+        "target_dy_range": [
+          -0.1,
+          0.1
+        ],
+        "target_dz_range": [
+          -0.1,
+          0.1
+        ],
+        "yaw_deg_range": [
+          -2.0,
+          2.0
+        ],
+        "max_velocity_range": [
+          0.5,
+          1.0
+        ]
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 0.4,
+        "att_kd": 1.6
+      },
+      "safety_envelope": {
+        "max_tilt_deg_max": 20.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "gain_multipliers.att_kd",
+        "type": "range",
+        "min": 1.3,
+        "max": 2.0,
+        "desc": "Increases angular rate damping (att_kd >= 1.4)"
+      },
+      {
+        "field": "gain_multipliers.att_kp",
+        "type": "range",
+        "min": 0.3,
+        "max": 0.6,
+        "desc": "Softens attitude proportional gain (att_kp <= 0.5) to stop chatter"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "Rejects false alarm (does not apply force when noise only)"
+      }
+    ]
+  },
+  {
+    "id": "TC-06",
+    "name": "Corridor Obstacle Evasion",
+    "category": "Spatial Evasion",
+    "image_path": "vlm/test_cases/tc_06_corridor_obstacle_evasion.jpg",
+    "instruction": "Proceed down the corridor, avoid the blocking obstacle directly ahead by steering around it into clear space.",
+    "telemetry": {
+      "altitude_m": 1.0,
+      "velocity_body_mps": [
+        0.1,
+        0.0,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "proximity_warning": "Obstacle detected dead-ahead at 1.1m distance."
+    },
+    "ground_truth": {
+      "diagnosis_keyword": "obstacle",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target_dx_range": [
+          0.6,
+          1.5
+        ],
+        "target_dy_range": [
+          -1.0,
+          1.0
+        ],
+        "target_dz_range": [
+          -0.2,
+          0.2
+        ],
+        "yaw_deg_range": [
+          -25.0,
+          25.0
+        ],
+        "max_velocity_range": [
+          0.6,
+          1.0
+        ],
+        "corridor_width_range": [
+          0.6,
+          1.2
+        ]
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg_max": 20.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.target[1]",
+        "type": "abs_min",
+        "min": 0.35,
+        "desc": "Commands significant lateral offset (|dy| >= 0.35m) to clear obstacle"
+      },
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "range",
+        "min": 0.4,
+        "max": 2.0,
+        "desc": "Advances forward past obstacle corridor"
+      }
+    ]
+  }
+]

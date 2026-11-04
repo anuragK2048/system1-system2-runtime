@@ -1,0 +1,540 @@
+[
+  {
+    "id": "TC-07",
+    "name": "Right-Turn Corridor Junction",
+    "category": "Visual Navigation",
+    "image_path": "vlm/test_cases_new/tc_07_right_turn_corridor.jpg",
+    "instruction": "Follow the flight corridor as it bends right, adjust heading to align with the corridor, and advance 1.5m.",
+    "telemetry": {
+      "altitude_m": 1.05,
+      "velocity_body_mps": [
+        0.05,
+        0.02,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": -0.5,
+        "yaw": -30.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "gyro_rms_radps": [
+        0.1,
+        0.12,
+        0.08
+      ]
+    },
+    "ground_truth": {
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          1.4,
+          0.4,
+          0.0
+        ],
+        "yaw_deg": 15.0,
+        "max_velocity": 1.0,
+        "corridor_width": 0.6
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 20.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "range",
+        "min": 0.8,
+        "max": 2.5,
+        "desc": "Commands forward progress along corridor"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "No false alarm force offset during calm flight"
+      },
+      {
+        "field": "motor_trim_scale",
+        "type": "ones_vector",
+        "desc": "Nominal motor trims"
+      }
+    ]
+  },
+  {
+    "id": "TC-08",
+    "name": "Lateral Crosswind (+Y Disturbance)",
+    "category": "Disturbance Rejection",
+    "image_path": "vlm/test_cases_new/tc_08_lateral_crosswind.jpg",
+    "instruction": "Compensate for the lateral crosswind pushing from the right (+Y) and hold current corridor position.",
+    "telemetry": {
+      "altitude_m": 1.0,
+      "velocity_body_mps": [
+        0.0,
+        -0.32,
+        -0.01
+      ],
+      "attitude_deg": {
+        "roll": -12.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        4.6,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.5,
+        3.1,
+        3.1,
+        3.5
+      ],
+      "gyro_rms_radps": [
+        0.25,
+        0.18,
+        0.1
+      ]
+    },
+    "ground_truth": {
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "yaw_deg": 0.0,
+        "max_velocity": 0.8,
+        "corridor_width": 0.6
+      },
+      "feedforward_force_offset": [
+        0.0,
+        -4.6,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.2,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 25.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "feedforward_force_offset[1]",
+        "type": "range",
+        "min": -5.0,
+        "max": -4.0,
+        "desc": "Applies opposing lateral force (-4.6N) along Y"
+      },
+      {
+        "field": "feedforward_force_offset[0]",
+        "type": "abs_max",
+        "max": 0.5,
+        "desc": "Zero force along X"
+      },
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "abs_max",
+        "max": 0.4,
+        "desc": "Holds station at waypoint"
+      }
+    ]
+  },
+  {
+    "id": "TC-09",
+    "name": "Cyan Landing Pad Touchdown",
+    "category": "Visual Servoing",
+    "image_path": "vlm/test_cases_new/tc_09_cyan_pad_touchdown.jpg",
+    "instruction": "Center directly over the cyan landing pad and complete landing descent to 0.15m.",
+    "telemetry": {
+      "altitude_m": 0.55,
+      "velocity_body_mps": [
+        -0.02,
+        0.01,
+        -0.04
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "gyro_rms_radps": [
+        0.08,
+        0.1,
+        0.06
+      ]
+    },
+    "ground_truth": {
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          0.1,
+          0.0,
+          -0.4
+        ],
+        "yaw_deg": 0.0,
+        "max_velocity": 0.5,
+        "corridor_width": 0.4
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 20.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.target[2]",
+        "type": "range",
+        "min": -0.5,
+        "max": -0.25,
+        "desc": "Commands vertical descent to 0.15m touchdown"
+      },
+      {
+        "field": "waypoint_command.max_velocity",
+        "type": "range",
+        "min": 0.3,
+        "max": 0.8,
+        "desc": "Emits gentle landing velocity (<= 0.8 m/s)"
+      },
+      {
+        "field": "motor_trim_scale",
+        "type": "ones_vector",
+        "desc": "Nominal motor trims"
+      }
+    ]
+  },
+  {
+    "id": "TC-10",
+    "name": "Payload Pendulum Oscillation",
+    "category": "Sensor Anomaly / Chatter",
+    "image_path": "vlm/test_cases_new/tc_10_payload_oscillation.jpg",
+    "instruction": "Damp high-frequency vibration chatter caused by payload swing and hold altitude.",
+    "telemetry": {
+      "altitude_m": 1.15,
+      "velocity_body_mps": [
+        0.02,
+        -0.03,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 1.5,
+        "pitch": -2.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.1,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.65,
+        3.65,
+        3.65,
+        3.65
+      ],
+      "gyro_rms_radps": [
+        1.32,
+        1.4,
+        0.38
+      ],
+      "oscillation_detected": true,
+      "oscillation_note": "attitude chatter from swing payload wx_rms=1.3rad/s, wy_rms=1.4rad/s"
+    },
+    "ground_truth": {
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "yaw_deg": 0.0,
+        "max_velocity": 0.8,
+        "corridor_width": 0.6
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 0.4,
+        "att_kd": 1.6
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 20.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "gain_multipliers.att_kd",
+        "type": "range",
+        "min": 1.3,
+        "max": 2.0,
+        "desc": "Boosts derivative damping (att_kd >= 1.4)"
+      },
+      {
+        "field": "gain_multipliers.att_kp",
+        "type": "range",
+        "min": 0.3,
+        "max": 0.6,
+        "desc": "Softens proportional gain (att_kp <= 0.5) to stop chatter"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "No false alarm lateral force for sensor noise"
+      }
+    ]
+  },
+  {
+    "id": "TC-11",
+    "name": "Motor 1 Fail during Forward Transit",
+    "category": "Actuator Failure",
+    "image_path": "vlm/test_cases_new/tc_11_motor_fail_forward.jpg",
+    "instruction": "Maintain forward corridor advance while compensating for Motor 1 actuator degradation.",
+    "telemetry": {
+      "altitude_m": 0.96,
+      "velocity_body_mps": [
+        0.4,
+        -0.05,
+        -0.02
+      ],
+      "attitude_deg": {
+        "roll": 5.0,
+        "pitch": -8.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.2,
+        0.1,
+        -1.8
+      ],
+      "unmodeled_moment_disturbance_Nm": [
+        0.2,
+        0.25,
+        0.04
+      ],
+      "motor_controls_N": [
+        5.9,
+        2.85,
+        2.85,
+        2.9
+      ],
+      "gyro_rms_radps": [
+        0.42,
+        0.48,
+        0.15
+      ]
+    },
+    "ground_truth": {
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "yaw_deg": 0.0,
+        "max_velocity": 0.7,
+        "corridor_width": 0.6
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        2.5,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 18.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "motor_trim_scale[0]",
+        "type": "range",
+        "min": 2.0,
+        "max": 2.5,
+        "desc": "Restores M1 thrust via 2.2-2.5x trim"
+      },
+      {
+        "field": "safety_envelope.max_tilt_deg",
+        "type": "range",
+        "min": 15.0,
+        "max": 20.0,
+        "desc": "Restricts tilt envelope during single-motor flight"
+      },
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "range",
+        "min": 0.5,
+        "max": 2.0,
+        "desc": "Maintains forward transit"
+      }
+    ]
+  },
+  {
+    "id": "TC-12",
+    "name": "Left Shoulder Obstacle Bypass",
+    "category": "Spatial Evasion",
+    "image_path": "vlm/test_cases_new/tc_12_left_obstacle_bypass.jpg",
+    "instruction": "Navigate past the obstacle ahead on the left by steering into the open right lane.",
+    "telemetry": {
+      "altitude_m": 1.0,
+      "velocity_body_mps": [
+        0.15,
+        0.0,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "proximity_warning": "Obstacle detected on left side at 1.0m distance. Right lane is clear."
+    },
+    "ground_truth": {
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          1.0,
+          0.65,
+          0.0
+        ],
+        "yaw_deg": 0.0,
+        "max_velocity": 0.8,
+        "corridor_width": 0.8
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 20.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.target[1]",
+        "type": "range",
+        "min": 0.35,
+        "max": 1.0,
+        "desc": "Steers laterally right (dy >= 0.35m) into clear lane"
+      },
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "range",
+        "min": 0.5,
+        "max": 2.0,
+        "desc": "Advances forward past obstacle"
+      }
+    ]
+  }
+]
