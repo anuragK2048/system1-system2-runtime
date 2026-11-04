@@ -804,6 +804,9 @@
         <span class="label">Tracking Err</span>
         <span class="value" id="hdr-pos-err">0.00m</span>
       </div>
+      <button id="btn-toggle-native-hud" onclick="toggleNative3DHud()" class="stat-pill" style="cursor: pointer; background: rgba(0, 229, 255, 0.12); border: 1px solid var(--cyan-bright); color: var(--cyan-bright); font-weight: 700; transition: all 0.2s;" title="Toggle 3D HUD geometric overlays in native MuJoCo viewer (or press 'H' in 3D window)">
+        <span id="btn-native-hud-text">👁️ 3D SIM HUD: ON</span>
+      </button>
       <div class="status-indicator">
         <div class="status-dot" id="conn-dot"></div>
         <span id="conn-text">STREAM 40Hz</span>
@@ -900,13 +903,35 @@
         </div>
       </section>
 
+      <!-- 2D Arena Tactical Radar & Spatial Minimap -->
+      <section class="dashboard-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="icon">🧭</span> 2D Arena Tactical Radar & Flight Path
+          </div>
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <div id="radar-target-badge" style="font-family: var(--font-mono); font-size: 10px; padding: 3px 8px; border-radius: 4px; background: rgba(0, 229, 255, 0.12); border: 1px solid rgba(0, 229, 255, 0.3); color: var(--cyan-bright); font-weight: 700;">
+              TARGET: PAD ALPHA (5.5m)
+            </div>
+            <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 10px;" onclick="clearRadarTrail()">CLEAR TRAIL</button>
+          </div>
+        </div>
+
+        <div class="panel-body" style="padding: 10px;">
+          <!-- Tactical Canvas Container -->
+          <div style="position: relative; inline-size: 100%; aspect-ratio: 16 / 9; background: #03070C; border-radius: 6px; overflow: hidden; border: 1px solid var(--border-color);">
+            <canvas id="arena-radar-canvas" style="inline-size: 100%; block-size: 100%; display: block;"></canvas>
+          </div>
+        </div>
+      </section>
+
       <!-- Navigation Test Director & Mission Selector -->
       <section class="dashboard-panel">
         <div class="panel-header">
           <div class="panel-title">
             <span class="icon">🎯</span> Target Navigation Missions & Test Cases
           </div>
-          <span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">SELECT OBJECTIVE</span>
+          <span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">SELECT OBJECTIVE (SEAMLESS IN-FLIGHT RETARGET)</span>
         </div>
 
         <div class="panel-body">
@@ -954,6 +979,25 @@
               </div>
               <div class="mission-desc">-90° active yaw saccade, approach glidepath, and arch passage.</div>
               <div class="mission-target-coords">X=0.0m, Y=-5.0m, Z=0.90m</div>
+            </div>
+
+            <div class="mission-card" data-target="home" onclick="selectMission('home')">
+              <div class="mission-header">
+                <span class="mission-name">ORIGIN PAD</span>
+                <span class="mission-icon">🏠</span>
+              </div>
+              <div class="mission-desc">Return along runway spine to origin home position.</div>
+              <div class="mission-target-coords">X=0.0m, Y=0.0m, Z=1.0m</div>
+            </div>
+
+            <!-- Grand Tour Featured Card -->
+            <div class="mission-card" data-target="grand_tour" onclick="selectMission('grand_tour')" style="grid-column: span 2; background: linear-gradient(135deg, rgba(255, 184, 0, 0.12) 0%, rgba(0, 229, 255, 0.08) 100%); border-color: rgba(255, 184, 0, 0.4);">
+              <div class="mission-header">
+                <span class="mission-name" style="color: var(--amber-bright); font-weight: 700;">🚀 GRAND TOUR (FULL ARENA SEQUENCE)</span>
+                <span class="mission-icon">🌐</span>
+              </div>
+              <div class="mission-desc">Continuous autonomous cruise: Runway Poles ➔ Pad Alpha ➔ Platform Delta ➔ Left Window ➔ Right Arch ➔ Origin (Seamless zero-reset).</div>
+              <div class="mission-target-coords" style="color: var(--cyan-bright);">Full 5-Landmark Arena Loop (Autonomous In-Air Sequencing)</div>
             </div>
           </div>
 
@@ -1270,9 +1314,31 @@
       try { return JSON.parse(str); } catch(e) { return null; }
     }
 
+    // Global Telemetry State & Trail
+    let latestTelemetry = null;
+    let radarTrail = [];
+    const maxTrailPoints = 140;
+
+    function clearRadarTrail() {
+      radarTrail = [];
+    }
+
+    function toggleNative3DHud() {
+      fetch("/api/sim/toggle_native_hud", { method: "POST" })
+        .then(r => r.json())
+        .then(data => {
+          const btn = document.getElementById("btn-native-hud-text");
+          if (btn) {
+            btn.innerText = data.native_hud_enabled ? "👁️ 3D SIM HUD: ON" : "👁️ 3D SIM HUD: OFF";
+          }
+        })
+        .catch(e => console.error("Could not toggle native HUD:", e));
+    }
+
     // Telemetry Update Handler
     function handleTelemetryUpdate(data) {
       if (!data) return;
+      latestTelemetry = data;
 
       // Header readouts
       document.getElementById("hdr-sim-time").innerText = `${data.time.toFixed(2)}s`;
@@ -1364,19 +1430,26 @@
       if (telemetryHistory.length > maxHistoryPoints) telemetryHistory.shift();
       renderTelemetryChart();
 
+      // Render 2D Tactical Arena Radar with Drone & Target Positions
+      renderArenaRadar(data);
+
       document.getElementById("lbl-chart-stats").innerText = `X: ${data.pos[0].toFixed(2)}m | Y: ${data.pos[1].toFixed(2)}m | Z: ${data.pos[2].toFixed(2)}m`;
     }
 
-    // Mission Selector Click
-    function selectMission(target) {
+    // Mission Selector Click (Seamless in-flight retarget)
+    function selectMission(target, immediateNavigate = true) {
       activeTarget = target;
       document.querySelectorAll(".mission-card").forEach(c => {
         c.classList.toggle("active", c.getAttribute("data-target") === target);
       });
+      // If drone is already running and airborne, immediately transition in mid-air!
+      if (immediateNavigate && latestTelemetry && latestTelemetry.is_running && latestTelemetry.altitude > 0.35) {
+        launchActiveMission(false);
+      }
     }
 
-    // Launch Mission
-    function launchActiveMission() {
+    // Launch Mission (Seamless retarget if reset is false, or origin launch if true)
+    function launchActiveMission(forceReset = false) {
       const useVlm = document.getElementById("chk-live-vlm").checked;
       fetch("/api/navigation/start", {
         method: "POST",
@@ -1385,21 +1458,268 @@
           target: activeTarget,
           use_vlm: useVlm,
           model: "gemini-3.5-flash-lite",
+          reset: forceReset,
         })
       }).then(r => r.json()).then(data => {
-        console.log("Mission started:", data);
+        console.log("Mission dispatch:", data);
         pollEvents();
       });
     }
 
-    // Stop Mission
+    // Stop Mission (Hover hold)
     function stopMission() {
       fetch("/api/navigation/stop", { method: "POST" });
     }
 
-    // Reset Drone
+    // Reset Drone (Explicit return to origin on ground)
     function resetDrone() {
+      clearRadarTrail();
       fetch("/api/navigation/reset", { method: "POST" });
+    }
+
+    // 2D Tactical Arena Radar Renderer
+    function renderArenaRadar(data) {
+      const canvas = document.getElementById("arena-radar-canvas");
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      const ctx = canvas.getContext("2d");
+      const W = canvas.width;
+      const H = canvas.height;
+
+      ctx.clearRect(0, 0, W, H);
+
+      // Arena bounds: X in [-1.5, 9.5], Y in [-6.5, 6.5]
+      const xMin = -1.5, xMax = 9.5;
+      const yMin = -6.5, yMax = 6.5;
+      const padX = 36 * dpr;
+      const padY = 24 * dpr;
+
+      function toC(x, y) {
+        const cx = padX + ((x - xMin) / (xMax - xMin)) * (W - 2 * padX);
+        const cy = H - (padY + ((y - yMin) / (yMax - yMin)) * (H - 2 * padY));
+        return [cx, cy];
+      }
+
+      // 1. Grid Lines
+      ctx.strokeStyle = "rgba(0, 229, 255, 0.08)";
+      ctx.lineWidth = 1 * dpr;
+      for (let x = -1; x <= 9; x += 1) {
+        const [cx1, cy1] = toC(x, yMin);
+        const [cx2, cy2] = toC(x, yMax);
+        ctx.beginPath();
+        ctx.moveTo(cx1, cy1);
+        ctx.lineTo(cx2, cy2);
+        ctx.stroke();
+      }
+      for (let y = -6; y <= 6; y += 1) {
+        const [cx1, cy1] = toC(xMin, y);
+        const [cx2, cy2] = toC(xMax, y);
+        ctx.beginPath();
+        ctx.moveTo(cx1, cy1);
+        ctx.lineTo(cx2, cy2);
+        ctx.stroke();
+      }
+
+      // Runway Corridor Guideway
+      const [r1x, r1y] = toC(0.0, 0.9);
+      const [r2x, r2y] = toC(8.5, -0.9);
+      ctx.fillStyle = "rgba(0, 229, 255, 0.03)";
+      ctx.fillRect(r1x, r1y, r2x - r1x, r2y - r1y);
+      ctx.strokeStyle = "rgba(0, 229, 255, 0.18)";
+      ctx.setLineDash([4 * dpr, 4 * dpr]);
+      ctx.strokeRect(r1x, r1y, r2x - r1x, r2y - r1y);
+      ctx.setLineDash([]);
+
+      // 2. Arena Landmarks
+      // A. Origin Pad [0, 0]
+      const [origX, origY] = toC(0.0, 0.0);
+      ctx.strokeStyle = "rgba(0, 229, 255, 0.5)";
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.beginPath();
+      ctx.arc(origX, origY, 8 * dpr, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(0, 229, 255, 0.75)";
+      ctx.font = `${8 * dpr}px JetBrains Mono, monospace`;
+      ctx.fillText("ORIGIN [0,0]", origX - 24 * dpr, origY + 16 * dpr);
+
+      // B. Runway Entrance Pylons [3.5, ±0.9]
+      const [pylL_X, pylL_Y] = toC(3.5, 0.9);
+      const [pylR_X, pylR_Y] = toC(3.5, -0.9);
+      ctx.fillStyle = "#FF3366";
+      ctx.beginPath();
+      ctx.arc(pylL_X, pylL_Y, 5 * dpr, 0, Math.PI * 2);
+      ctx.arc(pylR_X, pylR_Y, 5 * dpr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255, 51, 102, 0.4)";
+      ctx.setLineDash([2 * dpr, 2 * dpr]);
+      ctx.beginPath();
+      ctx.moveTo(pylL_X, pylL_Y);
+      ctx.lineTo(pylR_X, pylR_Y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#FF8099";
+      ctx.fillText("POLES (3.5m)", pylL_X - 22 * dpr, pylL_Y - 8 * dpr);
+
+      // C. Target Pad Alpha [5.5, 0.0]
+      const [alpX, alpY] = toC(5.5, 0.0);
+      ctx.strokeStyle = "#FFB800";
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.beginPath();
+      ctx.arc(alpX, alpY, 11 * dpr, 0, Math.PI * 2);
+      ctx.arc(alpX, alpY, 6 * dpr, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "#FFB800";
+      ctx.beginPath();
+      ctx.arc(alpX, alpY, 2.5 * dpr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillText("ALPHA (5.5m)", alpX - 22 * dpr, alpY + 20 * dpr);
+
+      // D. Elevated Platform Delta [8.0, 0.0]
+      const [delX, delY] = toC(8.0, 0.0);
+      const dSz = 10 * dpr;
+      ctx.strokeStyle = "#FFDD00";
+      ctx.lineWidth = 2 * dpr;
+      ctx.strokeRect(delX - dSz, delY - dSz, dSz * 2, dSz * 2);
+      ctx.fillStyle = "rgba(255, 221, 0, 0.15)";
+      ctx.fillRect(delX - dSz, delY - dSz, dSz * 2, dSz * 2);
+      ctx.fillStyle = "#FFDD00";
+      ctx.fillText("DELTA (8.0m)", delX - 22 * dpr, delY + 20 * dpr);
+
+      // E. Left Window [0.0, 5.0]
+      const [winX, winY] = toC(0.0, 5.0);
+      const [winAppX, winAppY] = toC(0.0, 3.5);
+      ctx.strokeStyle = "#00E5FF";
+      ctx.lineWidth = 3 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(winX - 14 * dpr, winY);
+      ctx.lineTo(winX + 14 * dpr, winY);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(0, 229, 255, 0.4)";
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.setLineDash([3 * dpr, 3 * dpr]);
+      ctx.beginPath();
+      ctx.moveTo(winAppX, winAppY);
+      ctx.lineTo(winX, winY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#00E5FF";
+      ctx.fillText("WINDOW (+90°)", winX - 28 * dpr, winY - 8 * dpr);
+
+      // F. Right Arch [0.0, -5.0]
+      const [arcX, arcY] = toC(0.0, -5.0);
+      const [arcAppX, arcAppY] = toC(0.0, -3.5);
+      ctx.strokeStyle = "#FF6600";
+      ctx.lineWidth = 3 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(arcX - 15 * dpr, arcY);
+      ctx.lineTo(arcX + 15 * dpr, arcY);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255, 102, 0, 0.4)";
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.setLineDash([3 * dpr, 3 * dpr]);
+      ctx.beginPath();
+      ctx.moveTo(arcAppX, arcAppY);
+      ctx.lineTo(arcX, arcY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#FF8833";
+      ctx.fillText("ARCH (-90°)", arcX - 24 * dpr, arcY + 16 * dpr);
+
+      // 3. Flight Breadcrumb Trail
+      const curX = data.pos[0];
+      const curY = data.pos[1];
+      if (radarTrail.length === 0 || Math.hypot(curX - radarTrail[radarTrail.length-1].x, curY - radarTrail[radarTrail.length-1].y) > 0.04) {
+        radarTrail.push({ x: curX, y: curY });
+        if (radarTrail.length > maxTrailPoints) radarTrail.shift();
+      }
+
+      if (radarTrail.length > 1) {
+        ctx.lineWidth = 2 * dpr;
+        for (let i = 1; i < radarTrail.length; i++) {
+          const pt1 = toC(radarTrail[i-1].x, radarTrail[i-1].y);
+          const pt2 = toC(radarTrail[i].x, radarTrail[i].y);
+          const alpha = 0.08 + 0.75 * (i / radarTrail.length);
+          ctx.strokeStyle = `rgba(0, 229, 255, ${alpha})`;
+          ctx.beginPath();
+          ctx.moveTo(pt1[0], pt1[1]);
+          ctx.lineTo(pt2[0], pt2[1]);
+          ctx.stroke();
+        }
+      }
+
+      // 4. Dynamic Laser Guide Line to Active Waypoint
+      const [drX, drY] = toC(curX, curY);
+      if (data.waypoint && data.waypoint.length >= 2) {
+        const [tgtX, tgtY] = toC(data.waypoint[0], data.waypoint[1]);
+        ctx.strokeStyle = "rgba(0, 255, 157, 0.6)";
+        ctx.lineWidth = 1.5 * dpr;
+        ctx.setLineDash([4 * dpr, 4 * dpr]);
+        ctx.beginPath();
+        ctx.moveTo(drX, drY);
+        ctx.lineTo(tgtX, tgtY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Pulsing Target Crosshair
+        ctx.strokeStyle = "#00FF9D";
+        ctx.lineWidth = 1.5 * dpr;
+        const pulse = 6 * dpr + Math.sin(Date.now() / 200) * 2 * dpr;
+        ctx.strokeRect(tgtX - pulse, tgtY - pulse, pulse * 2, pulse * 2);
+      }
+
+      // 5. Active Drone Symbol
+      const yawRad = (data.attitude.yaw * Math.PI) / 180.0;
+      ctx.save();
+      ctx.translate(drX, drY);
+
+      // Vision FOV Cone
+      const fovDist = 28 * dpr;
+      const fovAngle = 0.55;
+      ctx.fillStyle = "rgba(0, 229, 255, 0.12)";
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, fovDist, -yawRad - fovAngle, -yawRad + fovAngle);
+      ctx.closePath();
+      ctx.fill();
+
+      // Range Clearance Ring (1m)
+      ctx.strokeStyle = "rgba(0, 229, 255, 0.25)";
+      ctx.lineWidth = 1 * dpr;
+      const r1m = ((1.0 / (xMax - xMin)) * (W - 2 * padX));
+      ctx.beginPath();
+      ctx.arc(0, 0, r1m, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Drone Body Triangle
+      ctx.rotate(-yawRad);
+      ctx.fillStyle = "#00E5FF";
+      ctx.strokeStyle = "#FFFFFF";
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(10 * dpr, 0);
+      ctx.lineTo(-7 * dpr, -6 * dpr);
+      ctx.lineTo(-4 * dpr, 0);
+      ctx.lineTo(-7 * dpr, 6 * dpr);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.restore();
+
+      // 6. Update Target Status Pill in Radar Header
+      const badge = document.getElementById("radar-target-badge");
+      if (badge) {
+        const isClose = data.dist_to_waypoint < 0.25;
+        const statusTxt = isClose ? "LOCKED (HOLD)" : "IN TRANSIT";
+        badge.innerText = `TARGET: ${data.mission.toUpperCase()} | DIST: ${data.dist_to_waypoint.toFixed(2)}m | ${statusTxt}`;
+        badge.style.color = isClose ? "var(--mint-bright)" : "var(--cyan-bright)";
+        badge.style.borderColor = isClose ? "var(--mint-bright)" : "var(--cyan-bright)";
+      }
     }
 
     // Chaos Toggles

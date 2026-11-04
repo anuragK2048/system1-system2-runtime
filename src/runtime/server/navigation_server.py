@@ -39,11 +39,12 @@ FRONTEND_HTML = PROJECT_ROOT / "frontend" / "navigation_dashboard.html"
 
 
 class MissionLaunchRequest(BaseModel):
-    target: str = Field("alpha", description="Target: alpha | delta | runway_poles | window | arch")
+    target: str = Field("alpha", description="Target: alpha | delta | runway_poles | window | arch | home | grand_tour")
     use_vlm: bool = Field(False, description="Enable live Google Gemini multimodal visual reasoning")
     model: str = Field("gemini-3.5-flash-lite", description="VLM model identifier")
     chaos: Optional[str] = Field(None, description="Physical disturbance: wind | motor | None")
     duration: Optional[float] = Field(None, description="Max mission duration in seconds")
+    reset: bool = Field(False, description="Force reset to origin pad (False allows seamless in-flight retargeting)")
 
 
 class ChaosRequest(BaseModel):
@@ -215,9 +216,19 @@ def create_navigation_app() -> FastAPI:
                         model = cmd.get("model", "gemini-3.5-flash-lite")
                         chaos = cmd.get("chaos", None)
                         duration = cmd.get("duration", None)
+                        reset = bool(cmd.get("reset", False))
                         res = nav_coordinator.start_mission(
-                            target=target, use_vlm=use_vlm, model=model, chaos=chaos, duration=duration
+                            target=target,
+                            use_vlm=use_vlm,
+                            model=model,
+                            chaos=chaos,
+                            duration=duration,
+                            reset=reset,
                         )
+                        await websocket.send_text(json.dumps({"type": "command_ack", "data": res}))
+                    elif action == "retarget":
+                        target = cmd.get("target", "alpha")
+                        res = nav_coordinator.start_mission(target=target, reset=False)
                         await websocket.send_text(json.dumps({"type": "command_ack", "data": res}))
                     elif action == "stop":
                         res = nav_coordinator.stop_mission()
@@ -243,13 +254,26 @@ def create_navigation_app() -> FastAPI:
 
     @app.post("/api/navigation/start")
     def start_mission_endpoint(req: MissionLaunchRequest):
-        """Starts an autonomous flight mission."""
+        """Starts an autonomous flight mission (seamless in-flight retarget if airborne)."""
         return nav_coordinator.start_mission(
             target=req.target,
             use_vlm=req.use_vlm,
             model=req.model,
             chaos=req.chaos,
             duration=req.duration,
+            reset=req.reset,
+        )
+
+    @app.post("/api/navigation/retarget")
+    def retarget_mission_endpoint(req: MissionLaunchRequest):
+        """Seamlessly transitions the airborne drone to a new target without resetting."""
+        return nav_coordinator.start_mission(
+            target=req.target,
+            use_vlm=req.use_vlm,
+            model=req.model,
+            chaos=req.chaos,
+            duration=req.duration,
+            reset=False,
         )
 
     @app.post("/api/navigation/stop")
@@ -345,9 +369,17 @@ def create_navigation_app() -> FastAPI:
         """Returns the latest benchmark evaluation scorecard."""
         return {"results": nav_coordinator.suite_results}
 
+    @app.post("/api/sim/toggle_native_hud")
+    def toggle_native_hud_endpoint():
+        """Toggles geometric HUD overlays rendered inside the native MuJoCo passive viewer."""
+        from runtime.sim.native_hud_overlay import native_3d_hud
+        is_on = native_3d_hud.toggle()
+        return {"native_hud_enabled": is_on}
+
     @app.get("/api/status")
     def status_endpoint():
         """Health and coordinator status endpoint."""
+        from runtime.sim.native_hud_overlay import native_3d_hud
         return {
             "status": "online",
             "simulator": "DroneSimulator (Single Drone Arena)",
@@ -359,6 +391,7 @@ def create_navigation_app() -> FastAPI:
             "use_vlm": nav_coordinator.use_vlm,
             "vlm_model": nav_coordinator.vlm_model,
             "chaos_mode": nav_coordinator.chaos_mode,
+            "native_hud_enabled": native_3d_hud.enabled,
         }
 
     return app
@@ -369,11 +402,13 @@ app = create_navigation_app()
 
 def main():
     """Parses CLI arguments and launches navigation server on specified port."""
+    import threading
     parser = argparse.ArgumentParser(description="Single-Drone Target Navigation Dashboard & Server")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host interface (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
-    parser.add_argument("--autostart", type=str, default=None, choices=["alpha", "delta", "runway_poles", "window", "arch"], help="Autostart target mission on launch")
+    parser.add_argument("--autostart", type=str, default=None, choices=["alpha", "delta", "runway_poles", "window", "arch", "grand_tour"], help="Autostart target mission on launch")
     parser.add_argument("--use-vlm", action="store_true", help="Enable live Gemini VLM on launch")
+    parser.add_argument("--gui", action="store_true", help="Launch native 60 FPS MuJoCo 3D viewer window in parallel with web cockpit")
     args = parser.parse_args()
 
     if args.autostart:
@@ -384,6 +419,10 @@ def main():
     print(f"🌐 Server URL:     http://localhost:{args.port}")
     print(f"📺 Live FPV Feed:  http://localhost:{args.port}/api/fpv/stream?hud=true")
     print(f"📡 WebSocket:      ws://localhost:{args.port}/ws/telemetry")
+    if args.gui:
+        print(f"🖥️ Parallel 3D:    Native MuJoCo OpenGL 60 FPS Viewport Active")
+        print(f"   • Press 'H' in 3D window to toggle geometric HUD overlays")
+        print(f"   • Press '[' or ']' in 3D window to switch camera perspectives")
     print("═" * 78 + "\n")
 
     config = uvicorn.Config(
@@ -394,8 +433,33 @@ def main():
         timeout_graceful_shutdown=0.5,
     )
     server = uvicorn.Server(config)
+
     try:
-        server.run()
+        if args.gui:
+            import mujoco.viewer
+            from runtime.sim.native_hud_overlay import native_3d_hud
+
+            # Run uvicorn on daemon thread, MuJoCo Cocoa/GLFW window on macOS main thread
+            server_thread = threading.Thread(target=server.run, daemon=True, name="UvicornServerThread")
+            server_thread.start()
+
+            with mujoco.viewer.launch_passive(
+                nav_coordinator.sim.model,
+                nav_coordinator.sim.data,
+                key_callback=native_3d_hud.handle_key,
+            ) as viewer:
+                viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+                viewer.cam.trackbodyid = nav_coordinator.sim.drone_body_id
+                viewer.cam.distance = 2.8
+                viewer.cam.elevation = -18.0
+
+                while viewer.is_running() and not nav_coordinator.shutdown_event.is_set():
+                    with viewer.lock():
+                        native_3d_hud.render(viewer.user_scn, nav_coordinator.sim, nav_coordinator)
+                    viewer.sync()
+                    time.sleep(1.0 / 60.0)
+        else:
+            server.run()
     except KeyboardInterrupt:
         pass
     finally:

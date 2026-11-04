@@ -155,11 +155,49 @@ class NavigationSimulationCoordinator:
         model: str = "gemini-3.5-flash-lite",
         chaos: Optional[str] = None,
         duration: Optional[float] = None,
+        reset: bool = False,
     ) -> Dict[str, Any]:
-        """Configures and launches autonomous flight mission."""
+        """Configures and launches autonomous flight mission.
+        
+        If the drone is already airborne and reset is False, seamlessly transitions
+        the drone in mid-air to the new target without interrupting physics stepping.
+        """
         with self._lock:
+            target_clean = target.lower().strip()
+
+            # Check if drone is currently airborne and we can seamlessly retarget
+            is_airborne = (
+                self.is_running
+                and self._sim_thread is not None
+                and self._sim_thread.is_alive()
+                and float(self.sim.data.qpos[2]) > 0.4
+            )
+
+            if is_airborne and not reset:
+                self.target_mission = target_clean
+                self.use_vlm = use_vlm
+                self.vlm_model = model
+                self.chaos_mode = chaos if chaos in ("wind", "motor", "noise") else None
+                self.mission_status = "running"
+                self.max_duration = float(self.sim.data.time) + (float(duration) if duration else 45.0)
+                self.navigator.retarget(self.target_mission)
+                self._record_event(
+                    sim_time=float(self.sim.data.time),
+                    event_type="RETARGET_COMMAND",
+                    reason=f"Seamless in-flight transition to '{self.target_mission.upper()}'",
+                    diagnosis=f"Flight Phase: {self.navigator.phase}",
+                )
+                return {
+                    "status": "retargeted",
+                    "mission": self.target_mission,
+                    "phase": self.navigator.phase,
+                    "sim_time": float(round(self.sim.data.time, 2)),
+                    "use_vlm": self.use_vlm,
+                }
+
             # Stop existing run if active
             self.stop_mission(status="aborted")
+            self.shutdown_event.clear()
 
             # Determine mission duration
             if duration is not None and duration > 0.0:
@@ -293,10 +331,19 @@ class NavigationSimulationCoordinator:
                 t_sim = float(self.sim.data.time)
 
                 if t_sim >= self.max_duration:
-                    with self._lock:
-                        self.mission_status = "completed" if self.navigator.mission_complete else "timeout"
-                        self.is_running = False
-                    break
+                    # If holding station at target or in grand tour, extend time budget to hover indefinitely
+                    if self.navigator.mission_complete or self.mission_status in ("holding", "completed"):
+                        self.max_duration = t_sim + 60.0
+                    else:
+                        with self._lock:
+                            self.mission_status = "timeout"
+                        self._record_event(
+                            sim_time=t_sim,
+                            event_type="MISSION_TIMEOUT",
+                            reason=f"Mission '{self.target_mission.upper()}' duration budget reached",
+                            diagnosis="Holding station at current position",
+                        )
+                        self.max_duration = t_sim + 60.0
 
                 # 1. System 2 Cognitive Cycle (2 Hz or event-driven)
                 entry = self.navigator.step_cognitive_cycle(t_sim)
@@ -329,18 +376,17 @@ class NavigationSimulationCoordinator:
                 # 3. System 1 Reflex Cycle (500 Hz MuJoCo Step with Smoothing Filter)
                 self.sim.step_simulation(current_time=time.time())
 
-                # 4. Check for Mission Completion
-                if self.navigator.mission_complete and (t_sim - self.navigator.last_s2_time > 1.0):
-                    with self._lock:
-                        self.mission_status = "completed"
-                        self.is_running = False
-                    self._record_event(
-                        sim_time=t_sim,
-                        event_type="MISSION_SUCCESS",
-                        reason=f"Target '{self.target_mission.upper()}' reached successfully!",
-                        diagnosis="Station-keeping precision hold confirmed.",
-                    )
-                    break
+                # 4. Check for Mission Completion (Continues holding in air, does not stop simulation)
+                if self.navigator.mission_complete:
+                    if self.mission_status not in ("holding", "completed"):
+                        with self._lock:
+                            self.mission_status = "holding"
+                        self._record_event(
+                            sim_time=t_sim,
+                            event_type="MISSION_SUCCESS",
+                            reason=f"Target '{self.target_mission.upper()}' reached successfully!",
+                            diagnosis="Station-keeping precision hold confirmed (awaiting next waypoint)",
+                        )
 
                 # 5. Capture Telemetry Snapshot (Throttled to ~30 Hz sampling)
                 if len(self.telemetry_history) == 0 or (t_sim - self.telemetry_history[-1]["time"]) >= 0.033:
@@ -470,6 +516,12 @@ class NavigationSimulationCoordinator:
             "vlm_model": self.vlm_model,
             "vlm_call_count": getattr(self.navigator, "_vlm_call_count", 0),
             "chaos_mode": self.chaos_mode,
+            "grand_tour": {
+                "active": getattr(self.navigator, "grand_tour_mode", False),
+                "step": getattr(self.navigator, "grand_tour_step_idx", 0),
+                "total": len(getattr(self.navigator, "grand_tour_queue", [])),
+                "target": self.target_mission,
+            },
             "events": list(self.vlm_events)[:10],
             "perf": {
                 "peak_tilt": float(round(self.peak_tilt_deg, 1)),
