@@ -33,14 +33,17 @@
     <light name="spotlight" mode="targetbodycom" target="x2" pos="0 -1 2"/>
     <body name="x2" pos="0 0 0.1" childclass="x2">
       <freejoint/>
-      <camera name="track" pos="-1 0 .5" xyaxes="0 -1 0 1 0 2" mode="trackcom"/>
-      <camera name="fpv" pos="0.16 0 0.06" xyaxes="0 -1 0 -0.15 0 0.988" fovy="90"/>
+      <!-- Chase / tracking camera positioned behind drone looking forward along +X -->
+      <camera name="track" pos="-1.2 0 .5" xyaxes="0 -1 0 1 0 2" mode="trackcom"/>
+      <!-- Forward-facing FPV camera mounted on drone nose looking along +X with 8.6° downward tilt -->
+      <camera name="fpv" pos="0.16 0 0.06" xyaxes="0 -1 0 0.15 0 0.988" fovy="90"/>
       <site name="imu" pos="0 0 .02"/>
-      <geom material="phong3SG" mesh="X2_lowpoly" class="visual" quat="0 0 1 1"/>
-      <geom class="collision" size=".06 .027 .02" pos=".04 0 .02"/>
-      <geom class="collision" size=".06 .027 .02" pos=".04 0 .06"/>
-      <geom class="collision" size=".05 .027 .02" pos="-.07 0 .065"/>
-      <geom class="collision" size=".023 .017 .01" pos="-.137 .008 .065" quat="1 0 0 1"/>
+      <!-- Visual mesh rotated 180° around Z so the nose with gimbal camera faces forward along +X -->
+      <geom material="phong3SG" mesh="X2_lowpoly" class="visual" quat="1 1 0 0"/>
+      <geom class="collision" size=".06 .027 .02" pos="-.04 0 .02"/>
+      <geom class="collision" size=".06 .027 .02" pos="-.04 0 .06"/>
+      <geom class="collision" size=".05 .027 .02" pos=".07 0 .065"/>
+      <geom class="collision" size=".023 .017 .01" pos=".137 -.008 .065" quat="0 0 1 1"/>
       <geom name="rotor1" class="rotor" pos="-.14 -.18 .05" mass=".25"/>
       <geom name="rotor2" class="rotor" pos="-.14 .18 .05" mass=".25"/>
       <geom name="rotor3" class="rotor" pos=".14 .18 .08" mass=".25"/>
@@ -50,7 +53,7 @@
       <site name="thrust2" pos="-.14 .18 .05"/>
       <site name="thrust3" pos=".14 .18 .08"/>
       <site name="thrust4" pos=".14 -.18 .08"/>
-      <body name="payload" pos="0.08 0.08 -0.02">
+      <body name="payload" pos="-0.08 0.08 -0.02">
         <joint name="swing_x" type="hinge" axis="1 0 0" damping="0.005"/>
         <joint name="swing_y" type="hinge" axis="0 1 0" damping="0.005"/>
         <geom name="tether_rod" type="cylinder" fromto="0 0 0 0 0 -0.22" size="0.003" mass="0.001" rgba="1 0.85 0.1 0" contype="0" conaffinity="0"/>
