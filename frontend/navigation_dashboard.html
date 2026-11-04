@@ -799,10 +799,18 @@
       <section class="dashboard-panel">
         <div class="panel-header">
           <div class="panel-title">
-            <span class="icon">👁️</span> Onboard FPV Camera Feed (HUD Metric Ground Rings & Horizons)
+            <span class="icon">👁️</span> Onboard FPV Camera Feed
           </div>
-          <div style="display: flex; gap: 8px;">
-            <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 10px;" id="btn-toggle-hud">TOGGLE HUD</button>
+          <div style="display: flex; gap: 12px; align-items: center;">
+            <!-- Interactive RAW FPV vs HUD APPLIED Switch -->
+            <div class="hud-view-switcher" style="display: inline-flex; align-items: center; gap: 8px; background: rgba(0, 0, 0, 0.45); padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border-color); user-select: none;">
+              <span id="label-view-raw" style="font-size: 10px; font-weight: 600; font-family: var(--font-mono); color: var(--text-muted); cursor: pointer; transition: color 0.15s ease;" title="Click to view pure raw camera pixels">RAW FPV</span>
+              <label class="switch" style="inline-size: 32px; block-size: 16px; margin: 0;">
+                <input type="checkbox" id="toggle-hud-switch" checked />
+                <span class="slider" style="border-radius: 16px;"></span>
+              </label>
+              <span id="label-view-hud" style="font-size: 10px; font-weight: 700; font-family: var(--font-mono); color: var(--cyan-bright); cursor: pointer; transition: color 0.15s ease;" title="Click to view calibrated HUD projections">HUD APPLIED</span>
+            </div>
             <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 10px;" id="btn-snap-frame">📸 SNAPSHOT</button>
           </div>
         </div>
@@ -812,6 +820,7 @@
             <div class="hud-overlay-banner">
               <span>● FPV REC</span>
               <span id="hud-vlm-mode">DETERMINISTIC VLM</span>
+              <span id="hud-view-indicator" style="background: rgba(0, 240, 255, 0.15); color: var(--cyan-bright); padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: 700; border: 1px solid rgba(0, 240, 255, 0.3);">HUD: ON</span>
             </div>
 
             <div class="hud-phase-banner" id="hud-flight-phase">
@@ -1479,16 +1488,49 @@
       ctx.fillText("● L1 Force Residual (0-8N)", 180, 14);
     }
 
-    // Toggle HUD Query Parameter on Stream
-    document.getElementById("btn-toggle-hud").addEventListener("click", () => {
-      isHudEnabled = !isHudEnabled;
-      const img = document.getElementById("fpv-stream-img");
-      img.src = `/api/fpv/stream?hud=${isHudEnabled}&t=${Date.now()}`;
-    });
+    // Interactive RAW FPV vs HUD APPLIED Switch
+    const hudSwitch = document.getElementById("toggle-hud-switch");
+    const rawLabel = document.getElementById("label-view-raw");
+    const hudLabel = document.getElementById("label-view-hud");
+    const fpvImg = document.getElementById("fpv-stream-img");
+    const hudViewIndicator = document.getElementById("hud-view-indicator");
 
-    // Snapshot Frame
+    function setHudMode(enabled) {
+      isHudEnabled = enabled;
+      if (hudSwitch) hudSwitch.checked = enabled;
+
+      if (enabled) {
+        if (hudLabel) { hudLabel.style.color = "var(--cyan-bright)"; hudLabel.style.fontWeight = "700"; }
+        if (rawLabel) { rawLabel.style.color = "var(--text-muted)"; rawLabel.style.fontWeight = "600"; }
+        if (hudViewIndicator) {
+          hudViewIndicator.innerText = "HUD: ON";
+          hudViewIndicator.style.background = "rgba(0, 240, 255, 0.15)";
+          hudViewIndicator.style.color = "var(--cyan-bright)";
+          hudViewIndicator.style.borderColor = "rgba(0, 240, 255, 0.3)";
+        }
+        if (fpvImg) fpvImg.src = `/api/fpv/stream?hud=true&t=${Date.now()}`;
+      } else {
+        if (rawLabel) { rawLabel.style.color = "var(--amber-bright)"; rawLabel.style.fontWeight = "700"; }
+        if (hudLabel) { hudLabel.style.color = "var(--text-muted)"; hudLabel.style.fontWeight = "600"; }
+        if (hudViewIndicator) {
+          hudViewIndicator.innerText = "RAW FPV";
+          hudViewIndicator.style.background = "rgba(255, 184, 0, 0.15)";
+          hudViewIndicator.style.color = "var(--amber-bright)";
+          hudViewIndicator.style.borderColor = "rgba(255, 184, 0, 0.3)";
+        }
+        if (fpvImg) fpvImg.src = `/api/fpv/stream?hud=false&t=${Date.now()}`;
+      }
+    }
+
+    if (hudSwitch) {
+      hudSwitch.addEventListener("change", (e) => setHudMode(e.target.checked));
+    }
+    if (rawLabel) rawLabel.addEventListener("click", () => setHudMode(false));
+    if (hudLabel) hudLabel.addEventListener("click", () => setHudMode(true));
+
+    // Snapshot Frame (respects active HUD toggle)
     document.getElementById("btn-snap-frame").addEventListener("click", () => {
-      window.open("/api/fpv/frame?hud=true", "_blank");
+      window.open(`/api/fpv/frame?hud=${isHudEnabled}&t=${Date.now()}`, "_blank");
     });
 
     function handleStreamError() {
