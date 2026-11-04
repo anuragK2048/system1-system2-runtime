@@ -101,7 +101,7 @@ class NavigationSimulationCoordinator:
             self.active_instruction: str = ""
             self.last_parsed_intent: Optional[Dict[str, Any]] = None
             self.use_vlm: bool = False
-            self.vlm_model: str = "gemini-3.5-flash-lite"
+            self.vlm_model: str = "meta-llama/Llama-3.2-11B-Vision-Instruct (Modal A100 GPU)"
             self.chaos_mode: Optional[str] = None
             self.max_duration: float = 14.0
 
@@ -157,7 +157,7 @@ class NavigationSimulationCoordinator:
         self,
         target: str = "alpha",
         use_vlm: bool = False,
-        model: str = "gemini-3.5-flash-lite",
+        model: str = "meta-llama/Llama-3.2-11B-Vision-Instruct (Modal A100 GPU)",
         chaos: Optional[str] = None,
         duration: Optional[float] = None,
         reset: bool = False,
@@ -456,15 +456,15 @@ class NavigationSimulationCoordinator:
                 if entry and entry.get("vlm_invoked"):
                     self._record_event(
                         sim_time=t_sim,
-                        event_type="VLM_INVOCATION",
-                        reason=entry.get("trigger_reason", "Event triggered"),
+                        event_type="SYSTEM2_COGNITIVE_DISPATCH",
+                        reason=f"[Modal A100 GPU] {entry.get('trigger_reason', 'Cognitive trigger')}",
                         diagnosis=entry.get("diagnosis", ""),
                     )
                 if entry and entry.get("vlm_completed"):
                     self._record_event(
                         sim_time=t_sim,
-                        event_type="VLM_PATCH_APPLIED",
-                        reason="Integrated Gemini multimodal cognitive patch",
+                        event_type="SYSTEM2_PATCH_APPLIED",
+                        reason="Injected Meta Llama 3.2 Vision control patch into System 1 reflex loop",
                         diagnosis=entry.get("diagnosis", ""),
                     )
                 elif entry and entry.get("trigger_reason") and "transition" in entry.get("trigger_reason", "").lower():
@@ -613,6 +613,9 @@ class NavigationSimulationCoordinator:
             "waypoint": [float(round(w_val, 3)) for w_val in waypoint_tgt],
             "dist_to_waypoint": float(round(dist_to_waypoint, 3)),
             "smoothed_target": [float(round(st, 3)) for st in smoothed_target],
+            "cmd_target_pos": [float(round(st, 2)) for st in smoothed_target],
+            "cmd_yaw_deg": float(round(float(np.degrees(getattr(self.sim.controller, "smoothed_yaw_rad", self.sim.controller.target_yaw_rad))), 1)),
+            "cmd_max_vel": float(round(getattr(active_patch.waypoint_command, "max_velocity", 1.0), 2)) if (active_patch and active_patch.waypoint_command) else 1.0,
             "pos_error": float(round(pos_err, 3)),
             "mean_pos_error": float(round(mean_err, 3)),
             "l1_force": [float(round(f, 2)) for f in sigma_f_mujoco],

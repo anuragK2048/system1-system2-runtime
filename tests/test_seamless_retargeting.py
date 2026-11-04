@@ -71,7 +71,7 @@ class TestSeamlessNavigationRetargeting(unittest.TestCase):
         # Target must be either holding in-place at X=8.0 (visual saccade) or direct to window entrance [0, 3.8, 1.1]
         cmd_tgt = patch.waypoint_command.target
         self.assertNotEqual(cmd_tgt, [0.0, 0.0, 1.0], "Must NEVER route back through origin [0, 0, 1.0]")
-        self.assertIn("[SYSTEM 2 VLN]", patch.diagnosis)
+        self.assertTrue("[SYSTEM 2 VLN]" in patch.diagnosis or "[META LLAMA 3.2 VISION]" in patch.diagnosis)
 
     def test_explicit_reset_resets_origin(self):
         """Verifies passing reset=True resets drone to origin."""

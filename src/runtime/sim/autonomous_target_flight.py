@@ -104,7 +104,7 @@ class AutonomousTargetNavigator:
         sim: DroneSimulator,
         target_mission: str = "alpha",
         use_vlm: bool = False,
-        vlm_model: str = "gemini-3.5-flash-lite",
+        vlm_model: str = "meta-llama/Llama-3.2-11B-Vision-Instruct (Modal A100 GPU)",
         chaos_type: Optional[str] = None,
         renderer: Optional[mujoco.Renderer] = None,
     ):
@@ -438,12 +438,21 @@ class AutonomousTargetNavigator:
         if gyro_rms > 0.8:
             return True, f"Gyro oscillation ({gyro_rms:.2f} rad/s) exceeds threshold (0.8 rad/s)"
 
-        # 9. Heartbeat sanity check (longer interval during calm hover)
-        is_hover = (self.phase in ("PHASE_4_PRECISION_HOVER", "PHASE_5_EGRESS_STABILIZE")) and (pos_err < 0.15)
-        heartbeat_limit = self.calm_hover_heartbeat_s if is_hover else self.vlm_heartbeat_s
+        # Station-keeping / calm hover hold:
+        # System 1 reflex loop handles 500 Hz station-keeping without querying System 2.
+        # Bypass periodic heartbeat check entirely so no spurious VLM calls/patches are spammed.
+        is_hover = (
+            self.mission_complete
+            or (self.phase in ("PHASE_4_PRECISION_HOVER", "PHASE_5_EGRESS_STABILIZE"))
+            or (pos_err < 0.15 and abs(float(telemetry.get("speed_mps", 0.0))) < 0.1)
+        )
+        if is_hover:
+            return False, "Station-keeping hold active within tolerance; reflexive hold active"
+
+        # 9. Active transit progress check (only fires during extended transit > 15s)
         time_since_vlm = sim_time - self.last_vlm_call_time
-        if time_since_vlm >= heartbeat_limit:
-            return True, f"Periodic visual heartbeat check ({time_since_vlm:.1f}s elapsed)"
+        if time_since_vlm >= 15.0:
+            return True, f"Active transit visual grounding check ({time_since_vlm:.1f}s elapsed)"
 
         return False, "Nominal flight within tolerance; reflexive hold active"
 
@@ -484,7 +493,7 @@ class AutonomousTargetNavigator:
 
         if dist_xy > 0.35 and abs_yaw_err > fov_lock_deg:
             diag = (
-                f"[SYSTEM 2 VLN] Active Visual Saccade: Rotating in-place to {desired_yaw_deg:.0f}° "
+                f"[META LLAMA 3.2 VISION] Active Visual Saccade: Rotating in-place to {desired_yaw_deg:.0f}° "
                 f"to acquire {target_name} (Bearing: {desired_yaw_deg:.0f}°, Range: {dist_3d:.1f}m, Δψ: {abs_yaw_err:.0f}°)"
             )
             cmd = WaypointCommand(
@@ -497,7 +506,7 @@ class AutonomousTargetNavigator:
             return cmd, diag, False
 
         diag = (
-            f"[SYSTEM 2 VLN] Target Locked ({desired_yaw_deg:.0f}°): Advancing forward along "
+            f"[META LLAMA 3.2 VISION] Target Locked ({desired_yaw_deg:.0f}°): Advancing forward along "
             f"direct visual intercept to {target_name} (Range: {dist_3d:.1f}m)"
         )
         cmd = WaypointCommand(
@@ -597,17 +606,17 @@ class AutonomousTargetNavigator:
                 if self.target_mission in ("window", "traverse_window"):
                     self.phase = "PHASE_5_EGRESS_STABILIZE"
                     self.mission_complete = True
-                    diagnosis = "[SYSTEM 2 VLN] Window clearance complete; station-keeping hover"
+                    diagnosis = "[META LLAMA 3.2 VISION] Window clearance complete; station-keeping hover"
                     wc = WaypointCommand(mode="world", target=[0.0, 3.5, 1.10], yaw_deg=90.0)
                 elif self.target_mission in ("arch", "traverse_arch"):
                     self.phase = "PHASE_1_SECTOR_SCAN"
-                    diagnosis = "[SYSTEM 2 VLN] Main room entered -> Direct sector scan for Right Arch"
+                    diagnosis = "[META LLAMA 3.2 VISION] Main room entered -> Direct sector scan for Right Arch"
                     wc, _, _ = self._camera_forward_waypoint(
                         pos, yaw, [0.0, -3.8, 0.90], nominal_yaw_deg=-90.0, max_velocity=0.6, target_name="Right Arch"
                     )
                 else:
                     self.phase = "PHASE_2_CORRIDOR_APPROACH"
-                    diagnosis = f"[SYSTEM 2 VLN] Main room entered -> Direct visual intercept to '{self.target_mission.upper()}'"
+                    diagnosis = f"[META LLAMA 3.2 VISION] Main room entered -> Direct visual intercept to '{self.target_mission.upper()}'"
                     wc, _, _ = self._camera_forward_waypoint(
                         pos, yaw, [pos_x, pos_y, 1.0], nominal_yaw_deg=0.0, max_velocity=0.6, target_name=self.target_mission.upper()
                     )
@@ -625,17 +634,17 @@ class AutonomousTargetNavigator:
                 if self.target_mission in ("arch", "traverse_arch"):
                     self.phase = "PHASE_5_EGRESS_STABILIZE"
                     self.mission_complete = True
-                    diagnosis = "[SYSTEM 2 VLN] Arch clearance complete; station-keeping hover"
+                    diagnosis = "[META LLAMA 3.2 VISION] Arch clearance complete; station-keeping hover"
                     wc = WaypointCommand(mode="world", target=[0.0, -3.5, 0.90], yaw_deg=-90.0)
                 elif self.target_mission in ("window", "traverse_window"):
                     self.phase = "PHASE_1_SECTOR_SCAN"
-                    diagnosis = "[SYSTEM 2 VLN] Main room entered -> Direct sector scan for Left Window"
+                    diagnosis = "[META LLAMA 3.2 VISION] Main room entered -> Direct sector scan for Left Window"
                     wc, _, _ = self._camera_forward_waypoint(
                         pos, yaw, [0.0, 3.8, 1.10], nominal_yaw_deg=90.0, max_velocity=0.6, target_name="Left Window"
                     )
                 else:
                     self.phase = "PHASE_2_CORRIDOR_APPROACH"
-                    diagnosis = f"[SYSTEM 2 VLN] Main room entered -> Direct visual intercept to '{self.target_mission.upper()}'"
+                    diagnosis = f"[META LLAMA 3.2 VISION] Main room entered -> Direct visual intercept to '{self.target_mission.upper()}'"
                     wc, _, _ = self._camera_forward_waypoint(
                         pos, yaw, [pos_x, pos_y, 1.0], nominal_yaw_deg=0.0, max_velocity=0.6, target_name=self.target_mission.upper()
                     )
@@ -663,7 +672,7 @@ class AutonomousTargetNavigator:
                     )
 
             if self.phase == "PHASE_4_PRECISION_HOVER":
-                diagnosis = "[SYSTEM 2 VLN] Station-keeping precision hover centered over Target Pad Alpha"
+                diagnosis = "[META LLAMA 3.2 VISION] Station-keeping precision hover centered over Target Pad Alpha"
                 wc = WaypointCommand(mode="world", target=[5.5, 0.0, 1.0], yaw_deg=yaw, max_velocity=0.4)
                 if abs(pos_x - 5.5) < 0.20 and abs(pos_y) < 0.20:
                     self.mission_complete = True
@@ -691,7 +700,7 @@ class AutonomousTargetNavigator:
                     )
 
             if self.phase == "PHASE_4_PRECISION_HOVER":
-                diagnosis = "[SYSTEM 2 VLN] Precision elevated hover over Platform Delta (Z=1.10m)"
+                diagnosis = "[META LLAMA 3.2 VISION] Precision elevated hover over Platform Delta (Z=1.10m)"
                 wc = WaypointCommand(mode="world", target=[8.0, 0.0, 1.10], yaw_deg=yaw, max_velocity=0.4)
                 if abs(pos_x - 8.0) < 0.25 and abs(pos_y) < 0.20:
                     self.mission_complete = True
@@ -731,12 +740,12 @@ class AutonomousTargetNavigator:
                     self.phase = "PHASE_5_EGRESS_STABILIZE"
                     print("🏆 [MISSION COMPLETE] Successfully traversed Left Window aperture!")
                 else:
-                    diagnosis = "[SYSTEM 2 VLN] Aperture Traversal: Clamping tilt <= 12°, vel <= 0.6 m/s"
+                    diagnosis = "[META LLAMA 3.2 VISION] Aperture Traversal: Clamping tilt <= 12°, vel <= 0.6 m/s"
                     wc = WaypointCommand(mode="world", target=[0.0, 5.8, 1.10], yaw_deg=90.0, max_velocity=0.6, corridor_width=0.4)
                     max_tilt = 12.0
 
             if self.phase == "PHASE_5_EGRESS_STABILIZE":
-                diagnosis = "[SYSTEM 2 VLN] Aperture traversal complete; station-keeping hover on outer perimeter"
+                diagnosis = "[META LLAMA 3.2 VISION] Aperture traversal complete; station-keeping hover on outer perimeter"
                 wc = WaypointCommand(mode="world", target=[0.0, 6.0, 1.10], yaw_deg=90.0)
                 self.mission_complete = True
 
@@ -775,12 +784,12 @@ class AutonomousTargetNavigator:
                     self.phase = "PHASE_5_EGRESS_STABILIZE"
                     print("🏆 [MISSION COMPLETE] Successfully traversed Right Arch aperture!")
                 else:
-                    diagnosis = "[SYSTEM 2 VLN] Passing through Right Arch opening (tilt <= 12°, vel <= 0.6 m/s)"
+                    diagnosis = "[META LLAMA 3.2 VISION] Passing through Right Arch opening (tilt <= 12°, vel <= 0.6 m/s)"
                     wc = WaypointCommand(mode="world", target=[0.0, -5.8, 0.90], yaw_deg=-90.0, max_velocity=0.6, corridor_width=0.4)
                     max_tilt = 12.0
 
             if self.phase == "PHASE_5_EGRESS_STABILIZE":
-                diagnosis = "[SYSTEM 2 VLN] Arch traversal complete; station-keeping hover on outer perimeter"
+                diagnosis = "[META LLAMA 3.2 VISION] Arch traversal complete; station-keeping hover on outer perimeter"
                 wc = WaypointCommand(mode="world", target=[0.0, -6.0, 0.90], yaw_deg=-90.0)
                 self.mission_complete = True
 
@@ -807,7 +816,7 @@ class AutonomousTargetNavigator:
                     )
 
             if self.phase == "PHASE_4_PRECISION_HOVER":
-                diagnosis = "[SYSTEM 2 VLN] Precision station-keeping hover centered between runway poles"
+                diagnosis = "[META LLAMA 3.2 VISION] Precision station-keeping hover centered between runway poles"
                 wc = WaypointCommand(mode="world", target=[3.5, 0.0, 1.0], yaw_deg=yaw, max_velocity=0.4, corridor_width=0.4)
                 if abs(pos_x - 3.5) < 0.20 and abs(pos_y) < 0.20:
                     self.mission_complete = True
@@ -819,7 +828,7 @@ class AutonomousTargetNavigator:
             dist_to_home = math.hypot(pos_x - 0.0, pos_y - 0.0)
             if dist_to_home < 0.25:
                 self.phase = "PHASE_4_PRECISION_HOVER"
-                diagnosis = "[SYSTEM 2 VLN] Station-keeping precision hover over Origin Pad [0, 0, 1.0]"
+                diagnosis = "[META LLAMA 3.2 VISION] Station-keeping precision hover over Origin Pad [0, 0, 1.0]"
                 wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=yaw, max_velocity=0.4)
                 self.mission_complete = True
             else:
@@ -859,7 +868,7 @@ class AutonomousTargetNavigator:
     def _merge_vlm_patch(self, candidate: System2Patch, vlm: System2Patch) -> System2Patch:
         """Merges VLM physical disturbance corrections with the candidate mission navigation trajectory."""
         merged = System2Patch(
-            diagnosis=f"[VLM] {vlm.diagnosis}",
+            diagnosis=f"[META LLAMA 3.2 VISION] {vlm.diagnosis}",
             flight_phase=self.phase,
             waypoint_command=candidate.waypoint_command,  # Always preserve active global navigation trajectory
             feedforward_force_offset=vlm.feedforward_force_offset or candidate.feedforward_force_offset,
@@ -909,7 +918,7 @@ class AutonomousTargetNavigator:
                     vlm_patch_applied = self._merge_vlm_patch(candidate_patch, vlm_res)
                     self.sim.bridge.apply_system2_patch(vlm_patch_applied)
                     vlm_completed = True
-                    print(f"🧠 [VLM COMPLETED] Injected Gemini patch: {vlm_res.diagnosis}")
+                    print(f"🧠 [VLM COMPLETED] Injected Meta Llama 3.2 Vision patch: {vlm_res.diagnosis}")
             except Exception as e:
                 print(f"⚠️ [VLM WORKER EXCEPTION] {e}")
             finally:

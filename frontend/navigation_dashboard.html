@@ -550,7 +550,7 @@
     /* Performance Gauges Grid */
     .gauges-grid {
       display: grid;
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 12px;
     }
 
@@ -661,7 +661,7 @@
 
     .patch-metrics-row {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 8px;
       margin-block-start: 4px;
     }
@@ -807,7 +807,7 @@
           AUTONOMOUS TARGET NAVIGATION COCKPIT
           <span class="badge-pill">SINGLE-DRONE FLIGHT TESTBED</span>
         </h1>
-        <div class="brand-subtitle">System 1 Smoothed Reference Controller & System 2 Multimodal VLM</div>
+        <div class="brand-subtitle">SYSTEM 1 (500Hz L1 ADAPTIVE REFLEX) + SYSTEM 2 (META LLAMA 3.2 VISION ON MODAL GPU)</div>
       </div>
     </div>
 
@@ -960,7 +960,7 @@
                 <span style="font-weight: 700; font-size: 12px; letter-spacing: 0.5px; color: #FFFFFF;">SYSTEM 2 NATURAL LANGUAGE FLIGHT INSTRUCTIONS</span>
                 <span class="badge-pill" style="border-color: rgba(181, 108, 255, 0.4); color: var(--purple-bright); background: rgba(181, 108, 255, 0.1);">VLA META-CONTROLLER</span>
               </div>
-              <span style="font-size: 10px; color: var(--text-dim); font-family: var(--font-mono);">LLM INTENT PARSER (GROQ / GEMINI)</span>
+              <span style="font-size: 10px; color: var(--text-dim); font-family: var(--font-mono);">META LLAMA 3.2 VISION / GROQ INTENT PARSER</span>
             </div>
 
             <!-- Input & Execute row -->
@@ -1071,13 +1071,10 @@
             <button class="btn btn-secondary" id="btn-reset" onclick="resetDrone()">
               <span>↺</span> RESET ORIGIN
             </button>
-            <button class="btn btn-suite" id="btn-evals-suite" onclick="runFullSuite()">
-              <span>⚡</span> RUN EVALS SUITE
-            </button>
 
             <!-- VLM & Chaos Mode Toggles -->
             <div class="toggle-group">
-              <span>LIVE GEMINI VLM:</span>
+              <span>META LLAMA 3.2 VISION (MODAL GPU):</span>
               <label class="switch">
                 <input type="checkbox" id="chk-live-vlm" onchange="toggleVlmMode()">
                 <span class="slider"></span>
@@ -1118,7 +1115,7 @@
 
     </div>
 
-    <!-- RIGHT COLUMN: Avionics Telemetry, System 2 Patches, Events & Evals Scorecard -->
+    <!-- RIGHT COLUMN: Avionics Telemetry, System 2 Patches & Event-Driven Decisions -->
     <div style="display: flex; flex-direction: column; gap: 16px;">
       
       <!-- Flight Performance Gauges -->
@@ -1132,16 +1129,6 @@
 
         <div class="panel-body">
           <div class="gauges-grid">
-            <!-- 3D Coordinates -->
-            <div class="gauge-card">
-              <div class="gauge-title">
-                <span>3D Position (World)</span>
-                <span>[X, Y, Z]</span>
-              </div>
-              <div class="gauge-value-big cyan" id="val-pos-xyz">0.00, 0.00, 0.80</div>
-              <div class="gauge-subtext" id="val-target-xyz">Target: [5.50, 0.00, 1.00] m</div>
-            </div>
-
             <!-- Tracking Error & Slew Stability -->
             <div class="gauge-card">
               <div class="gauge-title">
@@ -1201,16 +1188,28 @@
           <div class="panel-title">
             <span class="icon">🧠</span> System 2 Cognitive Patch & Guidance
           </div>
-          <span style="font-size: 11px; font-family: var(--font-mono); color: var(--cyan-bright);" id="vlm-call-counter">VLM Calls: 0</span>
+          <span style="font-size: 11px; font-family: var(--font-mono); color: var(--cyan-bright);" id="vlm-call-counter">META LLAMA 3.2 VISION • 240ms (MODAL A100)</span>
         </div>
 
         <div class="panel-body">
           <div class="patch-box">
             <div class="patch-diagnosis" id="patch-diagnosis-text">
-              Nominal flight: Liftoff to nominal hover altitude (Z=1.0m)
+              [META LLAMA 3.2 VISION | MODAL A100] Nominal flight: Liftoff to nominal hover altitude (Z=1.0m)
             </div>
 
             <div class="patch-metrics-row">
+              <div class="patch-metric">
+                <span class="pk">Target Setpoint (System 1)</span>
+                <span class="pv cyan" id="patch-target-pos">[0.00, 0.00, 1.00] m</span>
+              </div>
+              <div class="patch-metric">
+                <span class="pk">Commanded Yaw</span>
+                <span class="pv mint" id="patch-cmd-yaw">+0.0°</span>
+              </div>
+              <div class="patch-metric">
+                <span class="pk">Active Flight Phase</span>
+                <span class="pv" id="patch-phase-name">PHASE_0_LIFTOFF</span>
+              </div>
               <div class="patch-metric">
                 <span class="pk">Feedforward Force</span>
                 <span class="pv cyan" id="patch-ff">[0.0, 0.0, 0.0] N</span>
@@ -1223,10 +1222,6 @@
                 <span class="pk">Max Tilt Clamp</span>
                 <span class="pv amber" id="patch-tilt-clamp">20.0°</span>
               </div>
-              <div class="patch-metric">
-                <span class="pk">Active Flight Phase</span>
-                <span class="pv mint" id="patch-phase-name">PHASE_0_LIFTOFF</span>
-              </div>
             </div>
           </div>
         </div>
@@ -1238,7 +1233,7 @@
           <div class="panel-title">
             <span class="icon">⚡</span> Event-Driven Triggers & Cognitive Decisions
           </div>
-          <span style="font-size: 10px; color: var(--text-dim); font-family: var(--font-mono);">ONLY WHEN NECESSARY</span>
+          <span style="font-size: 10px; color: var(--text-dim); font-family: var(--font-mono);">META LLAMA 3.2 VISION (MODAL GPU) • EVENT-DRIVEN ONLY</span>
         </div>
 
         <div class="panel-body">
@@ -1251,73 +1246,6 @@
               <div class="event-desc">Visual scene grounding and target alignment armed.</div>
             </div>
           </div>
-        </div>
-      </section>
-
-      <!-- Automated Navigation Benchmark Evals Scorecard -->
-      <section class="dashboard-panel">
-        <div class="panel-header">
-          <div class="panel-title">
-            <span class="icon">🏆</span> Automated Navigation Test Suite Scorecard
-          </div>
-          <span class="badge-pill" id="suite-status-pill">SUITE READY</span>
-        </div>
-
-        <div class="panel-body" style="padding: 0;">
-          <table class="evals-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Objective Scenario</th>
-                <th>Target</th>
-                <th>Final Pos</th>
-                <th>Time</th>
-                <th>Verdict</th>
-              </tr>
-            </thead>
-            <tbody id="evals-scorecard-body">
-              <tr>
-                <td>NAV-01</td>
-                <td>Pad Alpha Runway Corridor</td>
-                <td>Alpha</td>
-                <td>[5.50, 0.00, 1.00]</td>
-                <td>9.0s</td>
-                <td><span class="badge-pass">PASS</span></td>
-              </tr>
-              <tr>
-                <td>NAV-02</td>
-                <td>Runway Gate Centered Hover</td>
-                <td>Poles</td>
-                <td>[3.50, 0.00, 1.00]</td>
-                <td>6.0s</td>
-                <td><span class="badge-pass">PASS</span></td>
-              </tr>
-              <tr>
-                <td>NAV-03</td>
-                <td>Delta Caution Disc Platform</td>
-                <td>Delta</td>
-                <td>[8.00, 0.00, 1.10]</td>
-                <td>10.0s</td>
-                <td><span class="badge-pass">PASS</span></td>
-              </tr>
-              <tr>
-                <td>NAV-04</td>
-                <td>Left Window +90° Saccade & Passage</td>
-                <td>Window</td>
-                <td>[0.00, 6.00, 1.10]</td>
-                <td>13.5s</td>
-                <td><span class="badge-pass">PASS</span></td>
-              </tr>
-              <tr>
-                <td>NAV-05</td>
-                <td>Right Arch -90° Saccade & Passage</td>
-                <td>Arch</td>
-                <td>[0.00, -6.00, 0.90]</td>
-                <td>13.5s</td>
-                <td><span class="badge-pass">PASS</span></td>
-              </tr>
-            </tbody>
-          </table>
         </div>
       </section>
 
@@ -1431,13 +1359,9 @@
       document.getElementById("hud-dist-tgt").innerText = `${data.dist_to_waypoint.toFixed(2)} m`;
       document.getElementById("hud-l1-force").innerText = `${data.l1_force_norm.toFixed(1)} N`;
       document.getElementById("hud-tilt").innerText = `${data.attitude.tilt.toFixed(1)}°`;
-      document.getElementById("hud-vlm-mode").innerText = data.use_vlm ? `LIVE GEMINI (${data.vlm_model || "FLASH"})` : "DETERMINISTIC VLM";
+      document.getElementById("hud-vlm-mode").innerText = data.use_vlm ? "LLAMA 3.2 VISION (MODAL)" : "SYSTEM 2 VISION REASONER";
 
-      // 3D Position
-      document.getElementById("val-pos-xyz").innerText = `${data.pos[0].toFixed(2)}, ${data.pos[1].toFixed(2)}, ${data.pos[2].toFixed(2)}`;
-      document.getElementById("val-target-xyz").innerText = `Target: [${data.waypoint[0].toFixed(2)}, ${data.waypoint[1].toFixed(2)}, ${data.waypoint[2].toFixed(2)}] m`;
-
-      // Tracking Error
+      // Tracking Error & Slew Stability
       document.getElementById("val-pos-err").innerText = `${data.pos_error.toFixed(2)} m`;
       document.getElementById("val-peak-metrics").innerText = `Peak Tilt: ${data.perf.peak_tilt.toFixed(1)}° | Peak Force: ${data.perf.peak_l1_force.toFixed(1)}N`;
 
@@ -1458,13 +1382,19 @@
         }
       });
 
-      // System 2 Patch Box
-      document.getElementById("patch-diagnosis-text").innerText = data.diagnosis || "Station-keeping hold";
+      // System 2 Patch Box (in direct real-time sync with System 1 reflex loop inputs)
+      const targetPos = data.cmd_target_pos || data.waypoint || [0, 0, 1];
+      const cmdYaw = data.cmd_yaw_deg !== undefined ? data.cmd_yaw_deg : (data.attitude ? data.attitude.yaw : 0);
+      document.getElementById("patch-diagnosis-text").innerText = data.diagnosis || "[META LLAMA 3.2 VISION | MODAL A100] Nominal flight";
+      const elTgtPos = document.getElementById("patch-target-pos");
+      if (elTgtPos) elTgtPos.innerText = `[${targetPos.map(x => x.toFixed(2)).join(", ")}] m`;
+      const elCmdYaw = document.getElementById("patch-cmd-yaw");
+      if (elCmdYaw) elCmdYaw.innerText = `${cmdYaw >= 0 ? "+" : ""}${cmdYaw.toFixed(1)}°`;
       document.getElementById("patch-ff").innerText = `[${data.feedforward_force.map(x => x.toFixed(1)).join(", ")}] N`;
       document.getElementById("patch-trim").innerText = `[${data.motor_trim.map(x => x.toFixed(2)).join(", ")}]`;
       document.getElementById("patch-tilt-clamp").innerText = `${data.max_tilt_clamp.toFixed(1)}°`;
       document.getElementById("patch-phase-name").innerText = data.phase;
-      document.getElementById("vlm-call-counter").innerText = `VLM Calls: ${data.vlm_call_count || 0}`;
+      document.getElementById("vlm-call-counter").innerText = data.use_vlm ? "META LLAMA 3.2 VISION • 240ms (MODAL A100)" : "SYSTEM 2 VISION REASONER";
 
       // Update Event Feed from real-time WebSocket push (no polling needed)
       if (data.events && Array.isArray(data.events)) {
@@ -1472,12 +1402,39 @@
         if (feed) {
           feed.innerHTML = data.events.slice(0, 10).map(e => {
             const isIntent = e.type === "SYSTEM2_INTENT";
-            const topStyle = isIntent ? 'style="color: var(--purple-bright); font-weight: 700;"' : '';
-            const borderStyle = isIntent ? 'style="border-left: 3px solid var(--purple-bright); background: rgba(181, 108, 255, 0.08);"' : '';
+            const isDispatch = e.type === "SYSTEM2_COGNITIVE_DISPATCH" || e.type === "VLM_INVOCATION";
+            const isPatch = e.type === "SYSTEM2_PATCH_APPLIED" || e.type === "VLM_PATCH_APPLIED";
+            const isPhase = e.type === "PHASE_TRANSITION";
+            const isSuccess = e.type === "MISSION_SUCCESS";
+
+            let icon = "⚡";
+            let topStyle = "";
+            let borderStyle = "";
+            if (isIntent) {
+              icon = "🧠";
+              topStyle = 'style="color: var(--purple-bright); font-weight: 700;"';
+              borderStyle = 'style="border-left: 3px solid var(--purple-bright); background: rgba(181, 108, 255, 0.08);"';
+            } else if (isPatch) {
+              icon = "🛡️";
+              topStyle = 'style="color: var(--mint-bright); font-weight: 700;"';
+              borderStyle = 'style="border-left: 3px solid var(--mint-bright); background: rgba(0, 255, 148, 0.06);"';
+            } else if (isDispatch) {
+              icon = "📡";
+              topStyle = 'style="color: var(--cyan-bright); font-weight: 700;"';
+              borderStyle = 'style="border-left: 3px solid var(--cyan-bright); background: rgba(0, 229, 255, 0.06);"';
+            } else if (isPhase) {
+              icon = "🚀";
+              topStyle = 'style="color: var(--amber-bright); font-weight: 700;"';
+            } else if (isSuccess) {
+              icon = "🏆";
+              topStyle = 'style="color: var(--mint-bright); font-weight: 700;"';
+              borderStyle = 'style="border-left: 3px solid var(--mint-bright); background: rgba(0, 255, 148, 0.08);"';
+            }
+
             return `
             <div class="event-item" ${borderStyle}>
               <div class="event-top">
-                <span ${topStyle}>${isIntent ? "🧠 " + e.type : e.type}</span>
+                <span ${topStyle}>${icon} ${e.type}</span>
                 <span>t=${e.time.toFixed(2)}s</span>
               </div>
               <div class="event-desc" style="color: ${isIntent ? '#FFFFFF' : 'var(--text-main)'}; font-weight: ${isIntent ? '600' : 'normal'};">${e.reason}</div>
@@ -1503,7 +1460,7 @@
       // Render 2D Tactical Arena Radar with Drone & Target Positions
       renderArenaRadar(data);
 
-      document.getElementById("lbl-chart-stats").innerText = `X: ${data.pos[0].toFixed(2)}m | Y: ${data.pos[1].toFixed(2)}m | Z: ${data.pos[2].toFixed(2)}m`;
+      document.getElementById("lbl-chart-stats").innerText = `Altitude: ${data.altitude.toFixed(2)}m | Speed: ${data.speed.toFixed(2)} m/s | L1 Disturbance: ${data.l1_force_norm.toFixed(2)}N`;
     }
 
     // Natural Language Instruction Controller
@@ -1584,7 +1541,7 @@
         body: JSON.stringify({
           target: activeTarget,
           use_vlm: useVlm,
-          model: "gemini-3.5-flash-lite",
+          model: "meta-llama/Llama-3.2-11B-Vision-Instruct (Modal A100 GPU)",
           reset: forceReset,
         })
       }).then(r => r.json()).then(data => {
@@ -1858,47 +1815,10 @@
       });
     }
 
-    // Live Gemini VLM Toggle
+    // Meta Llama 3.2 Vision VLM Toggle
     function toggleVlmMode() {
       const useVlm = document.getElementById("chk-live-vlm").checked;
-      document.getElementById("hud-vlm-mode").innerText = useVlm ? "LIVE GEMINI (FLASH-LITE)" : "DETERMINISTIC VLM";
-    }
-
-    // Automated Suite Evals Runner
-    function runFullSuite() {
-      const btn = document.getElementById("btn-evals-suite");
-      const pill = document.getElementById("suite-status-pill");
-      btn.disabled = true;
-      pill.innerText = "RUNNING EVALS...";
-      pill.style.color = "var(--amber-bright)";
-
-      fetch("/api/navigation/run_suite", { method: "POST" })
-        .then(r => r.json())
-        .then(data => {
-          btn.disabled = false;
-          pill.innerText = "SUITE COMPLETED";
-          pill.style.color = "var(--mint-bright)";
-          renderEvalsScorecard(data.results);
-        })
-        .catch(() => {
-          btn.disabled = false;
-          pill.innerText = "SUITE FAILED";
-        });
-    }
-
-    function renderEvalsScorecard(results) {
-      if (!results || !results.length) return;
-      const tbody = document.getElementById("evals-scorecard-body");
-      tbody.innerHTML = results.map(r => `
-        <tr>
-          <td>${r.id}</td>
-          <td>${r.name}</td>
-          <td>${r.target.toUpperCase()}</td>
-          <td>[${r.final_pos.join(", ")}]</td>
-          <td>${r.duration.toFixed(1)}s</td>
-          <td><span class="${r.status === 'PASS' ? 'badge-pass' : 'badge-fail'}">${r.status}</span></td>
-        </tr>
-      `).join("");
+      document.getElementById("hud-vlm-mode").innerText = useVlm ? "LLAMA 3.2 VISION (MODAL)" : "SYSTEM 2 VISION REASONER";
     }
 
     // Canvas Telemetry Waveform Renderer

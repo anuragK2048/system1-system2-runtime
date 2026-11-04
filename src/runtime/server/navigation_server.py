@@ -46,8 +46,8 @@ FRONTEND_HTML = PROJECT_ROOT / "frontend" / "navigation_dashboard.html"
 
 class MissionLaunchRequest(BaseModel):
     target: str = Field("alpha", description="Target: alpha | delta | runway_poles | window | arch | home | grand_tour")
-    use_vlm: bool = Field(False, description="Enable live Google Gemini multimodal visual reasoning")
-    model: str = Field("gemini-3.5-flash-lite", description="VLM model identifier")
+    use_vlm: bool = Field(False, description="Enable Meta Llama 3.2 Vision reasoning on Modal GPU")
+    model: str = Field("meta-llama/Llama-3.2-11B-Vision-Instruct (Modal A100 GPU)", description="VLM model identifier")
     chaos: Optional[str] = Field(None, description="Physical disturbance: wind | motor | None")
     duration: Optional[float] = Field(None, description="Max mission duration in seconds")
     reset: bool = Field(False, description="Force reset to origin pad (False allows seamless in-flight retargeting)")
@@ -237,7 +237,7 @@ def create_navigation_app() -> FastAPI:
                     if action == "start":
                         target = cmd.get("target", "alpha")
                         use_vlm = bool(cmd.get("use_vlm", False))
-                        model = cmd.get("model", "gemini-3.5-flash-lite")
+                        model = cmd.get("model", "meta-llama/Llama-3.2-11B-Vision-Instruct (Modal A100 GPU)")
                         chaos = cmd.get("chaos", None)
                         duration = cmd.get("duration", None)
                         reset = bool(cmd.get("reset", False))
@@ -502,7 +502,7 @@ def main():
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host interface (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
     parser.add_argument("--autostart", type=str, default=None, choices=["alpha", "delta", "runway_poles", "window", "arch", "grand_tour"], help="Autostart target mission on launch")
-    parser.add_argument("--use-vlm", action="store_true", help="Enable live Gemini VLM on launch")
+    parser.add_argument("--use-vlm", action="store_true", help="Enable Meta Llama 3.2 Vision on Modal GPU on launch")
     parser.add_argument("--gui", action="store_true", help="Launch native 60 FPS MuJoCo 3D viewer window in parallel with web cockpit")
     args = parser.parse_args()
 
