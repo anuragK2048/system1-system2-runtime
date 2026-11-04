@@ -442,6 +442,27 @@
       margin-block-start: 4px;
     }
 
+    /* Voice Mode Audio Styles */
+    @keyframes pulse-voice-red {
+      0% { box-shadow: 0 0 0 0 rgba(255, 51, 102, 0.7); }
+      70% { box-shadow: 0 0 0 8px rgba(255, 51, 102, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(255, 51, 102, 0); }
+    }
+    @keyframes pulse-dot {
+      0% { opacity: 0.4; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1.15); }
+      100% { opacity: 0.4; transform: scale(0.9); }
+    }
+    .btn-voice-recording {
+      background: rgba(255, 51, 102, 0.22) !important;
+      border-color: #FF3366 !important;
+      color: #FF3366 !important;
+      animation: pulse-voice-red 1.4s infinite !important;
+    }
+    .pulse-indicator {
+      animation: pulse-dot 1.2s infinite ease-in-out;
+    }
+
     /* Action Controls Bar */
     .controls-bar {
       display: flex;
@@ -964,11 +985,24 @@
             </div>
 
             <!-- Input & Execute row -->
-            <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-              <input type="text" id="nl-instruction-input" placeholder="Type flight instruction... e.g. 'Find two poles and hover between them', 'Find the window and go through the window', 'Go to the orange pad'..." style="flex: 1; background: #080C12; border: 1px solid #222C3A; border-radius: 6px; padding: 10px 14px; color: #FFFFFF; font-size: 13px; font-family: var(--font-sans); outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--purple-bright)'" onblur="this.style.borderColor='#222C3A'" onkeydown="if(event.key==='Enter') executeNLInstruction()" />
+            <div style="display: flex; gap: 8px; margin-bottom: 10px; align-items: center;">
+              <input type="text" id="nl-instruction-input" placeholder="Type or speak flight instruction... e.g. 'Find two poles and hover between them', 'Find the window and go through the window', 'Go to the orange pad'..." style="flex: 1; background: #080C12; border: 1px solid #222C3A; border-radius: 6px; padding: 10px 14px; color: #FFFFFF; font-size: 13px; font-family: var(--font-sans); outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--purple-bright)'" onblur="this.style.borderColor='#222C3A'" onkeydown="if(event.key==='Enter') executeNLInstruction()" />
+              <button class="btn" id="btn-voice-mode" onclick="toggleVoiceMode()" title="Gemini Voice Mode (Click to Speak / Click to Send)" style="background: rgba(0, 240, 255, 0.12); border: 1px solid rgba(0, 240, 255, 0.45); color: var(--cyan-bright); font-weight: 700; padding: 10px 16px; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 0 10px rgba(0, 240, 255, 0.15); transition: all 0.2s;">
+                <span id="voice-mode-icon" style="font-size: 15px;">🎙️</span>
+                <span id="voice-mode-label">VOICE</span>
+              </button>
               <button class="btn" id="btn-execute-nl" onclick="executeNLInstruction()" style="background: var(--purple-bright); color: #06080C; font-weight: 700; padding: 10px 18px; box-shadow: 0 0 12px var(--purple-glow);">
                 <span>⚡</span> PARSE &amp; EXECUTE
               </button>
+            </div>
+
+            <!-- Voice Activity & Status Banner (Hidden when idle) -->
+            <div id="voice-status-banner" style="display: none; align-items: center; justify-content: space-between; background: rgba(0, 240, 255, 0.08); border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 6px; padding: 7px 12px; margin-bottom: 10px; font-size: 11px; font-family: var(--font-mono);">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span id="voice-pulse-dot" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--cyan-bright); box-shadow: 0 0 8px var(--cyan-bright);"></span>
+                <span id="voice-status-text" style="color: var(--cyan-bright); font-weight: 600;">VOICE MODE READY</span>
+              </div>
+              <span id="voice-model-badge" style="color: var(--text-muted); font-size: 10px; letter-spacing: 0.5px;">POWERED BY GOOGLE GEMINI</span>
             </div>
 
             <!-- Quick Semantic Chips -->
@@ -1492,6 +1526,274 @@
       }
     }
 
+    // ==========================================
+    // System 2 Gemini Voice Mode Controller
+    // ==========================================
+    let isRecordingVoice = false;
+    let mediaRecorder = null;
+    let audioStream = null;
+    let audioChunks = [];
+    let webSpeechRecognizer = null;
+    let liveBrowserTranscript = "";
+
+    function initSpeechRecognitionFallback() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) return null;
+      try {
+        const recognizer = new SpeechRecognition();
+        recognizer.continuous = true;
+        recognizer.interimResults = true;
+        recognizer.lang = "en-US";
+        recognizer.onresult = (event) => {
+          let interim = "";
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              liveBrowserTranscript += transcript + " ";
+            } else {
+              interim += transcript;
+            }
+          }
+          const fullPreview = (liveBrowserTranscript + interim).trim();
+          if (fullPreview) {
+            const input = document.getElementById("nl-instruction-input");
+            if (input && isRecordingVoice) {
+              input.value = fullPreview;
+            }
+            updateVoiceBanner(`🎙️ Listening: "${fullPreview}"`, true);
+          }
+        };
+        recognizer.onerror = (e) => {
+          console.warn("[Voice] Web Speech interim warning:", e.error);
+        };
+        return recognizer;
+      } catch (err) {
+        console.warn("[Voice] Web Speech init error:", err);
+        return null;
+      }
+    }
+
+    function updateVoiceBanner(text, isRecording = false, isError = false) {
+      const banner = document.getElementById("voice-status-banner");
+      const statusText = document.getElementById("voice-status-text");
+      const dot = document.getElementById("voice-pulse-dot");
+      if (!banner || !statusText) return;
+
+      banner.style.display = "flex";
+      statusText.innerText = text;
+
+      if (isError) {
+        banner.style.borderColor = "rgba(255, 51, 102, 0.4)";
+        banner.style.background = "rgba(255, 51, 102, 0.08)";
+        statusText.style.color = "#FF3366";
+        if (dot) {
+          dot.style.background = "#FF3366";
+          dot.style.boxShadow = "0 0 8px #FF3366";
+          dot.className = "";
+        }
+      } else if (isRecording) {
+        banner.style.borderColor = "rgba(255, 51, 102, 0.5)";
+        banner.style.background = "rgba(255, 51, 102, 0.12)";
+        statusText.style.color = "#FF3366";
+        if (dot) {
+          dot.style.background = "#FF3366";
+          dot.style.boxShadow = "0 0 10px #FF3366";
+          dot.className = "pulse-indicator";
+        }
+      } else {
+        banner.style.borderColor = "rgba(0, 240, 255, 0.3)";
+        banner.style.background = "rgba(0, 240, 255, 0.08)";
+        statusText.style.color = "var(--cyan-bright)";
+        if (dot) {
+          dot.style.background = "var(--cyan-bright)";
+          dot.style.boxShadow = "0 0 8px var(--cyan-bright)";
+          dot.className = "";
+        }
+      }
+    }
+
+    async function toggleVoiceMode() {
+      if (isRecordingVoice) {
+        await stopVoiceRecording();
+      } else {
+        await startVoiceRecording();
+      }
+    }
+
+    async function startVoiceRecording() {
+      const btn = document.getElementById("btn-voice-mode");
+      const icon = document.getElementById("voice-mode-icon");
+      const label = document.getElementById("voice-mode-label");
+      const input = document.getElementById("nl-instruction-input");
+
+      liveBrowserTranscript = "";
+      audioChunks = [];
+
+      try {
+        audioStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            sampleRate: 16000,
+          }
+        });
+
+        // Determine supported audio mime type
+        let mimeType = "audio/webm";
+        if (typeof MediaRecorder !== "undefined") {
+          if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+            mimeType = "audio/webm;codecs=opus";
+          } else if (MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")) {
+            mimeType = "audio/ogg;codecs=opus";
+          } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
+            mimeType = "audio/mp4";
+          }
+        }
+
+        mediaRecorder = new MediaRecorder(audioStream, { mimeType });
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            audioChunks.push(e.data);
+          }
+        };
+
+        mediaRecorder.start(200);
+        isRecordingVoice = true;
+
+        // Start optional Web Speech API concurrent preview
+        if (!webSpeechRecognizer) {
+          webSpeechRecognizer = initSpeechRecognitionFallback();
+        }
+        if (webSpeechRecognizer) {
+          try { webSpeechRecognizer.start(); } catch (_) {}
+        }
+
+        if (btn) {
+          btn.classList.add("btn-voice-recording");
+          if (icon) icon.innerText = "🔴";
+          if (label) label.innerText = "STOP & TRANSCRIBE";
+          btn.title = "Click to finish speaking and send audio to Gemini";
+        }
+        if (input) {
+          input.placeholder = "🎙️ Listening to flight command... speak now (e.g. 'Find the window and go through the window')...";
+          input.style.borderColor = "#FF3366";
+        }
+
+        updateVoiceBanner("🎙️ GEMINI VOICE MODE ACTIVE | Speak natural flight command... (Click button when done)", true);
+      } catch (err) {
+        console.error("Microphone access error:", err);
+        updateVoiceBanner(`Microphone access error: ${err.message || err}`, false, true);
+        if (btn) {
+          btn.classList.remove("btn-voice-recording");
+          if (icon) icon.innerText = "🎙️";
+          if (label) label.innerText = "VOICE";
+        }
+      }
+    }
+
+    async function stopVoiceRecording() {
+      const btn = document.getElementById("btn-voice-mode");
+      const icon = document.getElementById("voice-mode-icon");
+      const label = document.getElementById("voice-mode-label");
+      const input = document.getElementById("nl-instruction-input");
+
+      isRecordingVoice = false;
+
+      if (btn) {
+        btn.classList.remove("btn-voice-recording");
+        btn.disabled = true;
+        if (icon) icon.innerText = "⏳";
+        if (label) label.innerText = "TRANSCRIBING...";
+      }
+
+      updateVoiceBanner("⚡ Uploading audio to Google Gemini Speech Model...", false);
+
+      // Stop speech recognizer preview
+      if (webSpeechRecognizer) {
+        try { webSpeechRecognizer.stop(); } catch (_) {}
+      }
+
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+      }
+
+      // Stop mic stream tracks
+      if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+        audioStream = null;
+      }
+
+      // Wait a moment for final chunks to flush
+      await new Promise(r => setTimeout(r, 250));
+
+      const mimeType = mediaRecorder ? mediaRecorder.mimeType : "audio/webm";
+      const audioBlob = new Blob(audioChunks, { type: mimeType });
+
+      // Convert audio blob to base64
+      let audioBase64 = "";
+      try {
+        const reader = new FileReader();
+        const base64Promise = new Promise((resolve) => {
+          reader.onloadend = () => resolve(reader.result);
+        });
+        reader.readAsDataURL(audioBlob);
+        audioBase64 = await base64Promise;
+      } catch (err) {
+        console.warn("Base64 audio serialization issue:", err);
+      }
+
+      const clientPreview = (liveBrowserTranscript || (input ? input.value : "")).trim();
+
+      try {
+        const resp = await fetch("/api/voice/transcribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            audio_base64: audioBase64,
+            mime_type: mimeType,
+            client_transcript: clientPreview,
+            auto_execute: true,
+          }),
+        });
+        const data = await resp.json();
+
+        if (data && data.transcribed_text) {
+          if (input) {
+            input.value = data.transcribed_text;
+            input.style.borderColor = "var(--cyan-bright)";
+          }
+          const providerTag = data.provider === "gemini" ? `Google Gemini (${data.model})` : "Voice Parser";
+          const latencyTag = data.latency_ms ? `[${Math.round(data.latency_ms)}ms]` : "";
+          updateVoiceBanner(`✅ Transcribed via ${providerTag} ${latencyTag}: "${data.transcribed_text}"`, false);
+
+          if (data.executed_intent && data.executed_intent.target_action) {
+            selectMission(data.executed_intent.target_action, false);
+          }
+        } else {
+          updateVoiceBanner(data.error || "No speech instruction recognized", false, true);
+        }
+      } catch (err) {
+        console.error("Voice transcription network error:", err);
+        updateVoiceBanner(`Transcription error: ${err.message}`, false, true);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          if (icon) icon.innerText = "🎙️";
+          if (label) label.innerText = "VOICE";
+        }
+        if (input) {
+          input.placeholder = "Type or speak flight instruction... e.g. 'Find two poles and hover between them'...";
+        }
+        // Fade banner after 8 seconds if idle
+        setTimeout(() => {
+          const banner = document.getElementById("voice-status-banner");
+          if (banner && !isRecordingVoice) {
+            banner.style.display = "none";
+          }
+        }, 8000);
+      }
+    }
+
     // Mission Selector Click (Seamless in-flight retarget)
     function selectMission(target, immediateNavigate = true) {
       activeTarget = target;
@@ -1576,9 +1878,17 @@
       }
     }
 
-    // Global Hotkey Listener: Cmd+F or 'F' to toggle camera view
+    // Global Hotkey Listener: Cmd+F or 'F' to toggle camera view, Cmd+Shift+V for Voice Mode
     window.addEventListener("keydown", (e) => {
       const isInput = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
+
+      // Cmd+Shift+V: Voice Mode toggle
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "v" || e.key === "V")) {
+        e.preventDefault();
+        toggleVoiceMode();
+        return;
+      }
+
       if ((e.metaKey || e.ctrlKey) && (e.key === "f" || e.key === "F")) {
         if (!isInput) {
           e.preventDefault();

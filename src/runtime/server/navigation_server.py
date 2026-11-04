@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import json
 import os
 import sys
@@ -25,7 +26,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncGenerator, Dict, List, Optional, Set
+from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 
 import numpy as np
 import uvicorn
@@ -37,6 +38,7 @@ from pydantic import BaseModel, Field
 from runtime.server.navigation_state import nav_coordinator
 from runtime.chaos.presets import CHAOS_PRESETS
 from runtime.brain.intent_parser import intent_parser
+from runtime.brain.voice_transcriber import voice_transcriber, VoiceTranscriptionResult
 
 
 # Paths
@@ -57,6 +59,14 @@ class InstructionRequest(BaseModel):
     instruction: str = Field(..., description="Natural language flight instruction")
     use_llm: bool = Field(True, description="Enable LLM intent parsing")
     model: Optional[str] = Field(None, description="Optional LLM model override")
+
+
+class VoiceTranscribeRequest(BaseModel):
+    audio_base64: Optional[str] = Field(None, description="Base64 encoded audio string")
+    mime_type: str = Field("audio/webm", description="MIME type of recorded audio (audio/webm, audio/wav)")
+    client_transcript: Optional[str] = Field(None, description="Client Web Speech API preview transcript")
+    auto_execute: bool = Field(True, description="Whether to parse and execute flight target immediately")
+    model: Optional[str] = Field(None, description="Gemini model override")
 
 
 class ChaosRequest(BaseModel):
@@ -328,6 +338,86 @@ def create_navigation_app() -> FastAPI:
             model_override=req.model,
         )
         return nav_coordinator.execute_instruction(intent)
+
+    @app.post("/api/voice/transcribe")
+    async def voice_transcribe_endpoint(req: VoiceTranscribeRequest):
+        """Transcribes spoken flight audio using Google Gemini and optionally executes navigation."""
+        audio_bytes = b""
+        if req.audio_base64:
+            try:
+                b64_str = req.audio_base64
+                if "," in b64_str:
+                    b64_str = b64_str.split(",", 1)[1]
+                audio_bytes = base64.b64decode(b64_str)
+            except Exception as e:
+                print(f"⚠️ [VOICE API] Base64 decode error: {e}")
+
+        res: VoiceTranscriptionResult = await voice_transcriber.transcribe_audio_async(
+            audio_bytes=audio_bytes,
+            mime_type=req.mime_type,
+            client_fallback=req.client_transcript,
+            model_override=req.model,
+        )
+
+        if not res.success or not res.text:
+            return JSONResponse(
+                status_code=400 if not res.text else 200,
+                content={
+                    "status": "error" if not res.text else "ok",
+                    "transcribed_text": res.text,
+                    "confidence": res.confidence,
+                    "provider": res.provider,
+                    "model": res.model,
+                    "latency_ms": res.latency_ms,
+                    "auto_executed": False,
+                    "error": res.error or "No speech detected in audio stream",
+                },
+            )
+
+        executed_intent = None
+        if req.auto_execute:
+            intent = await intent_parser.parse_instruction_async(
+                instruction=res.text,
+                use_llm=True,
+            )
+            nav_res = nav_coordinator.execute_instruction(intent)
+            executed_intent = {
+                "target_action": intent.target_action,
+                "semantic_label": intent.semantic_label,
+                "visual_features": intent.visual_features,
+                "intent_reasoning": intent.intent_reasoning,
+                "flight_status": nav_res.get("flight_status"),
+            }
+
+            # Record synchronized Voice Mode event in flight telemetry
+            t_sim = float(nav_coordinator.sim.data.time)
+            nav_coordinator._record_event(
+                sim_time=t_sim,
+                event_type="VOICE_COMMAND",
+                reason=f"🎙️ Spoken Instruction: \"{res.text}\"",
+                diagnosis=f"Transcribed via Google Gemini ({res.model}, latency: {res.latency_ms:.0f}ms) ➔ Target: {intent.semantic_label}",
+            )
+
+        return {
+            "status": "ok",
+            "transcribed_text": res.text,
+            "confidence": res.confidence,
+            "provider": res.provider,
+            "model": res.model,
+            "latency_ms": res.latency_ms,
+            "auto_executed": bool(executed_intent is not None),
+            "executed_intent": executed_intent,
+        }
+
+    @app.get("/api/voice/status")
+    async def voice_status_endpoint():
+        """Returns Gemini Voice availability and candidate models."""
+        return {
+            "status": "ok",
+            "available": voice_transcriber.is_available,
+            "default_model": "gemini-3.5-flash",
+            "candidate_models": voice_transcriber.CANDIDATE_MODELS,
+        }
 
     @app.post("/api/navigation/stop")
     def stop_mission_endpoint():

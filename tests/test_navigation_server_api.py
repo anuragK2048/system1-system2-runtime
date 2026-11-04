@@ -180,6 +180,39 @@ class TestNavigationServerAPI(unittest.TestCase):
         nav_coordinator.toggle_camera_mode("free")
         self.assertEqual(nav_coordinator.camera_mode, "free")
 
+    def test_voice_status_api(self):
+        """Verifies GET /api/voice/status returns Gemini Voice provider availability."""
+        res = self.client.get("/api/voice/status")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["status"], "ok")
+        self.assertIn("available", data)
+        self.assertIn("default_model", data)
+        self.assertIn("gemini-3.5-flash", data["default_model"])
+
+    def test_voice_transcribe_with_client_fallback_and_execution(self):
+        """Verifies POST /api/voice/transcribe transcribes spoken input and dispatches flight intent."""
+        payload = {
+            "audio_base64": "",
+            "mime_type": "audio/webm",
+            "client_transcript": "Find the window and go through the window",
+            "auto_execute": True,
+        }
+        res = self.client.post("/api/voice/transcribe", json=payload)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["status"], "ok")
+        self.assertIn("window", data["transcribed_text"].lower())
+        self.assertTrue(data["auto_executed"])
+        self.assertIsNotNone(data["executed_intent"])
+        self.assertEqual(data["executed_intent"]["target_action"], "window")
+
+        # Telemetry should log VOICE_COMMAND event
+        snap = nav_coordinator.get_telemetry_snapshot()
+        events = snap.get("events", [])
+        voice_events = [e for e in events if e.get("type") == "VOICE_COMMAND"]
+        self.assertTrue(len(voice_events) > 0, "Expected at least one VOICE_COMMAND telemetry event")
+
 
 if __name__ == "__main__":
     unittest.main()
