@@ -54,5 +54,51 @@
     <geom name="pad_charlie_outer" type="cylinder" size="0.40 0.003" pos="11.0 -2.2 0.003" rgba="0.0 1.0 0.4 0.9" contype="0" conaffinity="0"/>
     <geom name="pad_charlie_inner" type="cylinder" size="0.20 0.004" pos="11.0 -2.2 0.004" rgba="0.05 0.6 0.25 0.95" contype="0" conaffinity="0"/>
     <geom name="pad_charlie_bullseye" type="cylinder" size="0.07 0.005" pos="11.0 -2.2 0.005" rgba="1.0 1.0 1.0 1.0" contype="0" conaffinity="0"/>
+
+    <!-- =================================================================== -->
+    <!-- ADJACENT APERTURES (WINDOW & ARCH)                                   -->
+    <!-- Sized with generous margins for future autonomous fly-through missions -->
+    <!-- (Skydio X2 span: 0.62m wide x 0.20m high; Openings: >=1.40m wide)    -->
+    <!-- =================================================================== -->
+
+    <!-- WINDOW STRUCTURE (Left Adjacent Side: Centered at X=5.5m, Y=+2.8m, Z=1.10m) -->
+    <!-- Clear opening: Width 1.40m (Y: 2.10m to 3.50m) x Height 1.20m (Z: 0.50m to 1.70m) -->
+    <!-- Bottom Wall / Sill Section (Z: 0.0m to 0.50m) -->
+    <geom name="window_wall_bottom" type="box" pos="5.5 2.8 0.25" size="0.06 0.80 0.25" rgba="0.25 0.28 0.32 1.0"/>
+    <geom name="window_sill_cap" type="box" pos="5.5 2.8 0.505" size="0.08 0.82 0.015" rgba="0.0 0.85 1.0 0.95"/>
+    <!-- Left Jamb / Post (Y = +3.56m) -->
+    <geom name="window_jamb_left" type="box" pos="5.5 3.56 1.10" size="0.06 0.06 0.60" rgba="0.25 0.28 0.32 1.0"/>
+    <geom name="window_jamb_left_accent" type="box" pos="5.5 3.51 1.10" size="0.07 0.015 0.60" rgba="0.0 0.85 1.0 0.95"/>
+    <!-- Right Jamb / Post (Y = +2.04m) -->
+    <geom name="window_jamb_right" type="box" pos="5.5 2.04 1.10" size="0.06 0.06 0.60" rgba="0.25 0.28 0.32 1.0"/>
+    <geom name="window_jamb_right_accent" type="box" pos="5.5 2.09 1.10" size="0.07 0.015 0.60" rgba="0.0 0.85 1.0 0.95"/>
+    <!-- Top Header / Lintel Section (Z: 1.70m to 1.95m) -->
+    <geom name="window_lintel_top" type="box" pos="5.5 2.8 1.825" size="0.06 0.80 0.125" rgba="0.25 0.28 0.32 1.0"/>
+    <geom name="window_lintel_trim" type="box" pos="5.5 2.8 1.695" size="0.08 0.82 0.015" rgba="0.0 0.85 1.0 0.95"/>
+    <!-- High-Visibility Fluorescent Window Corner Reference Markers for VLM detection -->
+    <geom name="window_corner_bl" type="cylinder" pos="5.5 2.15 0.56" size="0.035 0.07" quat="0.7071 0.7071 0 0" rgba="1.0 0.9 0.1 0.9" contype="0" conaffinity="0"/>
+    <geom name="window_corner_br" type="cylinder" pos="5.5 3.45 0.56" size="0.035 0.07" quat="0.7071 0.7071 0 0" rgba="1.0 0.9 0.1 0.9" contype="0" conaffinity="0"/>
+    <geom name="window_corner_tl" type="cylinder" pos="5.5 2.15 1.64" size="0.035 0.07" quat="0.7071 0.7071 0 0" rgba="1.0 0.9 0.1 0.9" contype="0" conaffinity="0"/>
+    <geom name="window_corner_tr" type="cylinder" pos="5.5 3.45 1.64" size="0.035 0.07" quat="0.7071 0.7071 0 0" rgba="1.0 0.9 0.1 0.9" contype="0" conaffinity="0"/>
+
+    <!-- ARCH STRUCTURE (Right Adjacent Side: Centered at X=5.5m, Y=-2.8m) -->
+    <!-- Clear opening: Width 1.50m (Y: -3.55m to -2.05m) x Height up to 1.85m peak -->
+    <!-- Left Vertical Column (Inner: Y = -1.98m, Z: 0.0m to 1.35m) -->
+    <geom name="arch_base_left" type="box" pos="5.5 -1.98 0.05" size="0.09 0.09 0.05" rgba="0.18 0.20 0.22 1.0"/>
+    <geom name="arch_post_left" type="cylinder" fromto="5.5 -1.98 0.05 5.5 -1.98 1.35" size="0.07" rgba="0.95 0.45 0.05 1.0"/>
+    <geom name="arch_band_left" type="cylinder" fromto="5.5 -1.98 0.65 5.5 -1.98 0.75" size="0.075" rgba="1.0 1.0 1.0 1.0" contype="0" conaffinity="0"/>
+    <!-- Right Vertical Column (Outer: Y = -3.62m, Z: 0.0m to 1.35m) -->
+    <geom name="arch_base_right" type="box" pos="5.5 -3.62 0.05" size="0.09 0.09 0.05" rgba="0.18 0.20 0.22 1.0"/>
+    <geom name="arch_post_right" type="cylinder" fromto="5.5 -3.62 0.05 5.5 -3.62 1.35" size="0.07" rgba="0.95 0.45 0.05 1.0"/>
+    <geom name="arch_band_right" type="cylinder" fromto="5.5 -3.62 0.65 5.5 -3.62 0.75" size="0.075" rgba="1.0 1.0 1.0 1.0" contype="0" conaffinity="0"/>
+    <!-- Curved Arch Vault Shoulders & Keystone Crown (Open arch with 1.85m peak clearance) -->
+    <geom name="arch_shoulder_left" type="cylinder" fromto="5.5 -1.98 1.35 5.5 -2.35 1.70" size="0.065" rgba="0.95 0.45 0.05 1.0"/>
+    <geom name="arch_shoulder_right" type="cylinder" fromto="5.5 -3.62 1.35 5.5 -3.25 1.70" size="0.065" rgba="0.95 0.45 0.05 1.0"/>
+    <geom name="arch_crown_beam" type="cylinder" fromto="5.5 -2.35 1.70 5.5 -3.25 1.70" size="0.065" rgba="0.95 0.45 0.05 1.0"/>
+    <geom name="arch_keystone" type="box" pos="5.5 -2.80 1.78" size="0.075 0.16 0.075" rgba="1.0 0.9 0.1 1.0"/>
+    <!-- High-Visibility Hazard Stripes / Beacons on Arch -->
+    <geom name="arch_beacon_left" type="cylinder" pos="5.5 -1.98 1.40" size="0.04 0.03" rgba="1.0 0.2 0.2 1.0" contype="0" conaffinity="0"/>
+    <geom name="arch_beacon_right" type="cylinder" pos="5.5 -3.62 1.40" size="0.04 0.03" rgba="1.0 0.2 0.2 1.0" contype="0" conaffinity="0"/>
+    <geom name="arch_beacon_center" type="cylinder" pos="5.5 -2.80 1.88" size="0.04 0.03" rgba="1.0 1.0 1.0 1.0" contype="0" conaffinity="0"/>
   </worldbody>
 </mujoco>
