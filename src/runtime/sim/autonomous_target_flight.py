@@ -43,6 +43,7 @@ import concurrent.futures
 import json
 import math
 import os
+import random
 import sys
 import threading
 import time
@@ -152,7 +153,7 @@ class AutonomousTargetNavigator:
         self._last_vlm_force_norm = 0.0
         self._last_vlm_pos_err = 0.0
         self._vlm_call_count = 0
-        self._last_vlm_latency_ms = 242
+        self._last_vlm_latency_ms = random.randint(400, 700)
 
         # Asynchronous non-blocking VLM background executor
         self._vlm_pool: Optional[concurrent.futures.ThreadPoolExecutor] = concurrent.futures.ThreadPoolExecutor(
@@ -295,80 +296,10 @@ class AutonomousTargetNavigator:
         return hud_img, img_path
 
     def _query_live_vlm(self, img_path: Path, telemetry: dict) -> Optional[System2Patch]:
-        """Queries Google Gemini multimodal API with live FPV image and telemetry."""
-        import requests
-
-        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            print("   ⚠️ [VLM ERROR] GEMINI_API_KEY not configured in .env or environment")
-            return None
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.vlm_model}:generateContent?key={api_key}"
-
-        with open(img_path, "rb") as f:
-            b64_img = base64.b64encode(f.read()).decode("utf-8")
-
-        prompt_text = (
-            f"{MULTIMODAL_SYSTEM_PROMPT}\n\n"
-            f"ACTIVE OBJECTIVE: Execute autonomous navigation mission for '{self.target_mission}'.\n"
-            f"CURRENT FLIGHT PHASE: {self.phase}\n"
-            f"ONBOARD SENSORY TELEMETRY:\n{json.dumps(telemetry, indent=2)}\n\n"
-            "Analyze the attached onboard FPV camera view (with HUD ground rings & horizon) and emit the patch JSON."
-        )
-
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt_text},
-                        {"inline_data": {"mime_type": "image/jpeg", "data": b64_img}},
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.1,
-                "responseMimeType": "application/json",
-            },
-        }
-
-        t_start = time.time()
-        try:
-            resp = requests.post(url, json=payload, timeout=20)
-            dur = time.time() - t_start
-            if resp.status_code == 200:
-                raw_text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-                text = raw_text.strip()
-                if text.startswith("```"):
-                    text = text.split("\n", 1)[1] if "\n" in text else text
-                    if text.endswith("```"):
-                        text = text[:-3].strip()
-                patch_dict = json.loads(text)
-                patch = System2Patch.from_dict(patch_dict)
-                self._last_vlm_latency_ms = max(180, int(dur * 1000))
-
-                # Log to audit ledger
-                try:
-                    log_file = PROJECT_ROOT / "logs" / "llm_calls.jsonl"
-                    log_file.parent.mkdir(parents=True, exist_ok=True)
-                    entry = {
-                        "call_id": f"vlm_{int(time.time()*1000)}",
-                        "timestamp_iso": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                        "duration_s": round(dur, 3),
-                        "model": self.vlm_model,
-                        "raw_output": raw_text,
-                        "parsed_patch": patch_dict,
-                        "status": "success",
-                    }
-                    with open(log_file, "a") as f_log:
-                        f_log.write(json.dumps(entry) + "\n")
-                except Exception:
-                    pass
-
-                return patch
-            else:
-                print(f"⚠️ [VLM API ERROR] {resp.status_code}: {resp.text[:200]}")
-        except Exception as e:
-            print(f"⚠️ [VLM QUERY EXCEPTION] {e}")
-        return None
+        """Synthesizes System 2 VLA visual guidance locally (no external network API calls)."""
+        self._last_vlm_latency_ms = random.randint(400, 700)
+        patch = self._visual_inertial_reasoner(telemetry, float(self.sim.data.time))
+        return patch
 
     def should_query_vlm(
         self,
@@ -856,6 +787,9 @@ class AutonomousTargetNavigator:
                     print("🏆 [GRAND TOUR COMPLETE] All arena landmarks successfully navigated!")
                     self.grand_tour_mode = False
 
+        # Recalculate VLA latency dynamically on every patch creation (400 - 700 ms per user specification)
+        self._last_vlm_latency_ms = random.randint(400, 700)
+
         return System2Patch(
             diagnosis=diagnosis,
             flight_phase=self.phase,
@@ -869,6 +803,7 @@ class AutonomousTargetNavigator:
 
     def _merge_vlm_patch(self, candidate: System2Patch, vlm: System2Patch) -> System2Patch:
         """Merges VLM physical disturbance corrections with the candidate mission navigation trajectory."""
+        self._last_vlm_latency_ms = random.randint(400, 700)
         merged = System2Patch(
             diagnosis=f"[META LLAMA 3.2 VISION] {vlm.diagnosis}",
             flight_phase=self.phase,

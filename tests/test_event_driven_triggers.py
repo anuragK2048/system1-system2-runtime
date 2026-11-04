@@ -97,10 +97,35 @@ class TestEventDrivenTriggersAndGuidance(unittest.TestCase):
         self.assertNotIn("btn-chaos-wind", content)
         self.assertNotIn("Feedforward Force", content)
         self.assertNotIn("GROQ INTENT PARSER", content)
+        self.assertNotIn("nl-intent-feedback", content)
+        self.assertNotIn("IDENTIFIED TARGET", content)
         self.assertIn("VLA Response Latency", content)
         self.assertIn("Visual Navigation Target", content)
         self.assertIn("META LLAMA 3.2 VISION ON MODAL GPU", content)
         self.assertIn("grid-template-columns: repeat(3, 1fr)", content)
+
+    def test_vla_latency_dynamic_recalculation_range(self):
+        """Verifies VLA latency is dynamically recalculated within 400-700ms on every patch creation."""
+        latencies = []
+        telemetry = self.navigator.get_onboard_telemetry()
+        for i in range(15):
+            patch = self.navigator._query_live_vlm(None, telemetry)
+            self.assertIsNotNone(patch)
+            lat = self.navigator._last_vlm_latency_ms
+            self.assertGreaterEqual(lat, 400)
+            self.assertLessEqual(lat, 700)
+            latencies.append(lat)
+
+        # Ensure random recalculation occurs (not a static constant)
+        self.assertGreater(len(set(latencies)), 1, "VLA latency was expected to vary across patch calls")
+
+    def test_offline_vla_query_no_network(self):
+        """Verifies _query_live_vlm executes locally without requiring live external network endpoints."""
+        telemetry = self.navigator.get_onboard_telemetry()
+        patch = self.navigator._query_live_vlm(None, telemetry)
+        self.assertIsNotNone(patch)
+        self.assertIn("PHASE_", patch.flight_phase)
+        self.assertIsNotNone(patch.waypoint_command)
 
 
 if __name__ == "__main__":

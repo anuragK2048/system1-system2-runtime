@@ -982,16 +982,6 @@
               <button class="chip-btn" onclick="setInstructionPrompt('Return to launch position')">🏠 "Return to launch position"</button>
               <button class="chip-btn" onclick="setInstructionPrompt('Inspect all arena landmarks in sequence')">🚀 "Inspect all arena landmarks in sequence"</button>
             </div>
-
-            <!-- Live LLM Intent Feedback Card -->
-            <div id="nl-intent-feedback" style="display: none; margin-top: 10px; padding: 10px 12px; background: rgba(181, 108, 255, 0.08); border: 1px solid rgba(181, 108, 255, 0.3); border-radius: 6px; font-size: 11px;">
-              <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                <span id="nl-intent-target" style="font-weight: 700; color: var(--cyan-bright); font-family: var(--font-mono);"></span>
-                <span id="nl-intent-conf" style="color: var(--mint-bright); font-family: var(--font-mono); font-size: 10px;"></span>
-              </div>
-              <div id="nl-intent-visual" style="color: var(--text-muted); margin-bottom: 2px;"></div>
-              <div id="nl-intent-reason" style="color: #FFFFFF; font-style: italic;"></div>
-            </div>
           </div>
 
           <div class="mission-grid">
@@ -1480,21 +1470,6 @@
         // Highlight corresponding mission card in UI
         if (data.target_action) {
           selectMission(data.target_action, false);
-        }
-
-        // Display real-time LLM intent feedback card
-        const fb = document.getElementById("nl-intent-feedback");
-        const fbTarget = document.getElementById("nl-intent-target");
-        const fbConf = document.getElementById("nl-intent-conf");
-        const fbVisual = document.getElementById("nl-intent-visual");
-        const fbReason = document.getElementById("nl-intent-reason");
-
-        if (fb) {
-          fb.style.display = "block";
-          fbTarget.innerText = `🎯 IDENTIFIED TARGET: ${data.semantic_label.toUpperCase()} (${data.target_action})`;
-          fbConf.innerText = `CONFIDENCE: ${(data.confidence * 100).toFixed(0)}% [AUTONOMOUS VLA]`;
-          fbVisual.innerText = `👁️ VISUAL CUES: ${data.visual_features}`;
-          fbReason.innerText = `🧠 SYSTEM 2 REASONING: "${data.intent_reasoning}"`;
         }
       } catch (err) {
         console.error("Instruction execution error:", err);
