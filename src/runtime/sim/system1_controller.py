@@ -578,7 +578,7 @@ class System1Controller:
             quat=quat,
             omega=omega,
             motor_ctrl=motor_thrusts,
-            target_pos=current_target_pos,
+            target_pos=smoothed_target,
             sigma_f_hat=sigma_f_hat_mujoco,
             sigma_M_hat=sigma_M_hat_mujoco,
         )
@@ -615,6 +615,7 @@ class System1Controller:
             "current_yaw_deg": float(yaw_deg),
             "smoothed_target_pos": [float(x) for x in self.smoothed_target_pos],
             "smoothed_target_vel": [float(x) for x in self.smoothed_target_vel],
+            "target_vel": [float(x) for x in self.smoothed_target_vel],
         }
 
         return motor_thrusts, diagnostics
@@ -725,7 +726,7 @@ class System1Controller:
             quat=quat,
             omega=omega,
             motor_ctrl=motor_thrusts,
-            target_pos=current_target_pos,
+            target_pos=smoothed_target,
             sigma_f_hat=np.zeros(3),
             sigma_M_hat=np.zeros(3),
         )
@@ -752,5 +753,6 @@ class System1Controller:
             "current_yaw_deg": float(np.degrees(current_yaw)),
             "smoothed_target_pos": [float(x) for x in self.smoothed_target_pos],
             "smoothed_target_vel": [float(x) for x in self.smoothed_target_vel],
+            "target_vel": [float(x) for x in self.smoothed_target_vel],
         }
         return motor_thrusts, diagnostics

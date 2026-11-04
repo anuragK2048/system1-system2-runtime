@@ -117,6 +117,9 @@ class AutonomousTargetNavigator:
         self.hud = HUDProjector(camera_name="fpv", width=480, height=360)
         self.renderer = mujoco.Renderer(sim.model, height=360, width=480)
 
+        # Tune bridge trigger threshold for active multi-meter navigation missions
+        self.sim.bridge.pos_error_threshold = 1.5
+
         # Mission Flight Phase State Machine
         self.phase = "PHASE_0_LIFTOFF"
         self.phase_start_time = 0.0
@@ -133,6 +136,7 @@ class AutonomousTargetNavigator:
         self.vlm_heartbeat_s = 3.0        # Max interval in transit before periodic visual check
         self.calm_hover_heartbeat_s = 5.0  # Max interval during steady hover hold
         self._prev_phase = self.phase
+        self._prev_waypoint_target: Optional[np.ndarray] = None
         self._last_vlm_force_norm = 0.0
         self._last_vlm_pos_err = 0.0
         self._vlm_call_count = 0
@@ -249,7 +253,12 @@ class AutonomousTargetNavigator:
             print(f"⚠️ [VLM QUERY EXCEPTION] {e}")
         return None
 
-    def should_query_vlm(self, telemetry: dict, sim_time: float) -> Tuple[bool, str]:
+    def should_query_vlm(
+        self,
+        telemetry: dict,
+        sim_time: float,
+        candidate_patch: Optional[System2Patch] = None,
+    ) -> Tuple[bool, str]:
         """Evaluates whether an expensive multimodal VLM call is necessary.
 
         Triggers conditionally on:
@@ -257,7 +266,7 @@ class AutonomousTargetNavigator:
         2. Flight phase / leg transitions (milestone advancement).
         3. Force disturbance anomalies (L1 observer residual spiked > 1.8N or delta > 1.0N).
         4. Actuator degradation / motor failure (thrust asymmetry > 1.8N).
-        5. Position tracking error excursions (> 0.35m).
+        5. Trajectory tracking error excursions (> 0.35m from smoothed reference).
         6. Excessive attitude tilt (> 20.0 deg).
         7. Gyro chatter / oscillation (> 0.8 rad/s).
         8. Heartbeat sanity check (every 3.0s in active transit, 5.0s in calm hover).
@@ -268,11 +277,19 @@ class AutonomousTargetNavigator:
         if self.last_vlm_call_time < 0.0:
             return True, "Initial mission assessment and visual scene grounding"
 
-        # 2. Flight phase transition or waypoint arrival
+        # 2. Flight phase transition
         if self.phase != self._prev_phase:
             return True, f"Flight phase transition: {self._prev_phase} -> {self.phase}"
 
-        # 3. External force disturbance (wind gust / microburst onset or cessation)
+        # 3. Commanded waypoint / sub-leg advancement
+        if candidate_patch and candidate_patch.waypoint_command and candidate_patch.waypoint_command.target:
+            cand_tgt = np.array(candidate_patch.waypoint_command.target[:3], dtype=np.float32)
+            if self._prev_waypoint_target is not None:
+                wpt_dist = float(np.linalg.norm(cand_tgt - self._prev_waypoint_target))
+                if wpt_dist > 0.4:
+                    return True, f"Waypoint leg advanced by {wpt_dist:.2f}m -> {cand_tgt.tolist()}"
+
+        # 4. External force disturbance (wind gust / microburst onset or cessation)
         f_dist = telemetry.get("unmodeled_force_disturbance_N", [0.0, 0.0, 0.0])
         f_norm = float(np.linalg.norm(f_dist))
         if f_norm > 1.8 and abs(f_norm - self._last_vlm_force_norm) > 1.0:
@@ -280,20 +297,20 @@ class AutonomousTargetNavigator:
         if self._last_vlm_force_norm > 1.8 and f_norm < 0.8:
             return True, f"L1 force disturbance cleared ({f_norm:.1f}N < 0.8N), returning to calm hover"
 
-        # 4. Actuator degradation / motor failure
+        # 5. Actuator degradation / motor failure
         m_ctrl = telemetry.get("motor_controls_N", [3.25, 3.25, 3.25, 3.25])
         m_spread = float(max(m_ctrl) - min(m_ctrl))
         if m_spread > 1.8 and m_ctrl[0] > 4.5:
             return True, f"Actuator command asymmetry ({max(m_ctrl):.1f}N vs {min(m_ctrl):.1f}N) indicates motor degradation"
 
-        # 5. Position tracking excursion
-        target_pos = self.sim.controller.target_pos
+        # 6. Trajectory tracking excursion from smoothed reference model
+        smoothed_pos = getattr(self.sim.controller, "smoothed_target_pos", self.sim.controller.target_pos)
         curr_pos = self.sim.data.qpos[0:3]
-        pos_err = float(np.linalg.norm(target_pos - curr_pos))
+        pos_err = float(np.linalg.norm(smoothed_pos - curr_pos))
         if pos_err > 0.35 and abs(pos_err - self._last_vlm_pos_err) > 0.20:
-            return True, f"Position tracking error ({pos_err:.2f}m) exceeds threshold (0.35m)"
+            return True, f"Trajectory tracking error ({pos_err:.2f}m) exceeds threshold (0.35m)"
 
-        # 6. Total attitude tilt excursion
+        # 7. Total attitude tilt excursion
         att = telemetry.get("attitude_deg", {})
         roll = abs(float(att.get("roll", 0.0)))
         pitch = abs(float(att.get("pitch", 0.0)))
@@ -301,12 +318,12 @@ class AutonomousTargetNavigator:
         if tilt_est > 20.0:
             return True, f"Attitude tilt ({tilt_est:.1f}°) exceeds threshold (20.0°)"
 
-        # 7. Gyro chatter / oscillation
+        # 8. Gyro chatter / oscillation
         gyro_rms = float(np.linalg.norm(telemetry.get("gyro_rms_radps", [0, 0, 0])))
         if gyro_rms > 0.8:
             return True, f"Gyro oscillation ({gyro_rms:.2f} rad/s) exceeds threshold (0.8 rad/s)"
 
-        # 8. Heartbeat sanity check (longer interval during calm hover)
+        # 9. Heartbeat sanity check (longer interval during calm hover)
         is_hover = (self.phase in ("PHASE_4_PRECISION_HOVER", "PHASE_5_EGRESS_STABILIZE")) and (pos_err < 0.15)
         heartbeat_limit = self.calm_hover_heartbeat_s if is_hover else self.vlm_heartbeat_s
         time_since_vlm = sim_time - self.last_vlm_call_time
@@ -349,26 +366,25 @@ class AutonomousTargetNavigator:
         # ----------------------------------------------------------------------
         if self.target_mission in ("alpha", "corridor"):
             if self.phase == "PHASE_0_LIFTOFF":
-                diagnosis = "Liftoff to nominal hover altitude (Z=1.0m)"
-                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
                 if abs(alt - 1.0) < 0.08 and sim_time > 1.0:
                     self.phase = "PHASE_2_CORRIDOR_APPROACH"
                     print("🚀 [PHASE TRANSITION] Liftoff complete -> PHASE_2_CORRIDOR_APPROACH")
+                else:
+                    diagnosis = "Liftoff to nominal hover altitude (Z=1.0m)"
+                    wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
 
-            elif self.phase == "PHASE_2_CORRIDOR_APPROACH":
+            if self.phase == "PHASE_2_CORRIDOR_APPROACH":
                 if pos_x < 2.5:
                     diagnosis = "Advancing through hazard pylons along runway corridor (Leg 1)"
                     wc = WaypointCommand(mode="world", target=[2.8, 0.0, 1.0], yaw_deg=0.0, max_velocity=1.2, corridor_width=0.6)
-                elif pos_x < 4.8:
+                elif pos_x < 5.0:
                     diagnosis = "Visually tracking Target Pad Alpha concentric rings (Leg 2)"
                     wc = WaypointCommand(mode="world", target=[5.5, 0.0, 1.0], yaw_deg=0.0, max_velocity=1.0, corridor_width=0.6)
                 else:
                     self.phase = "PHASE_4_PRECISION_HOVER"
-                    diagnosis = "Target Pad Alpha centered in nadir ground rings -> PHASE_4_PRECISION_HOVER"
                     print("🎯 [PHASE TRANSITION] Pad Alpha visually acquired -> PHASE_4_PRECISION_HOVER")
-                    wc = WaypointCommand(mode="world", target=[5.5, 0.0, 1.0], yaw_deg=0.0, max_velocity=0.5)
 
-            else:  # PHASE_4_PRECISION_HOVER
+            if self.phase == "PHASE_4_PRECISION_HOVER":
                 diagnosis = "Station-keeping precision hover centered over Target Pad Alpha"
                 wc = WaypointCommand(mode="world", target=[5.5, 0.0, 1.0], yaw_deg=0.0, max_velocity=0.4)
                 if abs(pos_x - 5.5) < 0.15:
@@ -379,26 +395,25 @@ class AutonomousTargetNavigator:
         # ----------------------------------------------------------------------
         elif self.target_mission in ("delta", "pedestal"):
             if self.phase == "PHASE_0_LIFTOFF":
-                diagnosis = "Liftoff to nominal hover altitude (Z=1.0m)"
-                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
                 if abs(alt - 1.0) < 0.08 and sim_time > 1.0:
                     self.phase = "PHASE_2_CORRIDOR_APPROACH"
                     print("🚀 [PHASE TRANSITION] Liftoff complete -> PHASE_2_CORRIDOR_APPROACH")
+                else:
+                    diagnosis = "Liftoff to nominal hover altitude (Z=1.0m)"
+                    wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
 
-            elif self.phase == "PHASE_2_CORRIDOR_APPROACH":
+            if self.phase == "PHASE_2_CORRIDOR_APPROACH":
                 if pos_x < 3.5:
                     diagnosis = "Advancing past hazard pylons (Leg 1)"
                     wc = WaypointCommand(mode="world", target=[4.0, 0.0, 1.0], yaw_deg=0.0, max_velocity=1.4)
-                elif pos_x < 6.5:
+                elif pos_x < 7.2:
                     diagnosis = "Overflying Pad Alpha toward Elevated Platform Delta (Leg 2)"
                     wc = WaypointCommand(mode="world", target=[8.0, 0.0, 1.10], yaw_deg=0.0, max_velocity=1.2)
                 else:
                     self.phase = "PHASE_4_PRECISION_HOVER"
-                    diagnosis = "Station Delta platform acquired -> PHASE_4_PRECISION_HOVER"
                     print("🎯 [PHASE TRANSITION] Platform Delta acquired -> PHASE_4_PRECISION_HOVER")
-                    wc = WaypointCommand(mode="world", target=[8.0, 0.0, 1.10], yaw_deg=0.0, max_velocity=0.5)
 
-            else:  # PHASE_4_PRECISION_HOVER
+            if self.phase == "PHASE_4_PRECISION_HOVER":
                 diagnosis = "Precision elevated hover over Platform Delta (Z=1.10m)"
                 wc = WaypointCommand(mode="world", target=[8.0, 0.0, 1.10], yaw_deg=0.0, max_velocity=0.4)
                 if abs(pos_x - 8.0) < 0.20:
@@ -409,35 +424,39 @@ class AutonomousTargetNavigator:
         # ----------------------------------------------------------------------
         elif self.target_mission in ("window", "traverse_window"):
             if self.phase == "PHASE_0_LIFTOFF":
-                diagnosis = "Liftoff to window centerline altitude (Z=1.10m)"
-                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.10], yaw_deg=0.0)
                 if abs(alt - 1.10) < 0.08 and sim_time > 1.0:
                     self.phase = "PHASE_1_SECTOR_SCAN"
                     print("👁️ [ACTIVE PERCEPTION] Window unobservable in forward FOV -> In-Place Yaw Saccade (+90° Left)")
+                else:
+                    diagnosis = "Liftoff to window centerline altitude (Z=1.10m)"
+                    wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.10], yaw_deg=0.0)
 
-            elif self.phase == "PHASE_1_SECTOR_SCAN":
-                diagnosis = "Active saccade: in-place yaw rotation +90° to visually acquire Left Window"
-                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.10], yaw_deg=90.0, max_velocity=0.6)
-                if abs(yaw - 90.0) < 3.0:
+            if self.phase == "PHASE_1_SECTOR_SCAN":
+                if abs(yaw - 90.0) < 4.0:
                     self.phase = "PHASE_2_CORRIDOR_APPROACH"
                     print("✅ [TARGET ACQUIRED] Left Window framed in HUD -> PHASE_2_CORRIDOR_APPROACH")
+                else:
+                    diagnosis = "Active saccade: in-place yaw rotation +90° to visually acquire Left Window"
+                    wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.10], yaw_deg=90.0, max_velocity=0.6)
 
-            elif self.phase == "PHASE_2_CORRIDOR_APPROACH":
-                diagnosis = "Approaching Left Window along HUD approach glidepath vector"
-                wc = WaypointCommand(mode="world", target=[0.0, 3.8, 1.10], yaw_deg=90.0, max_velocity=0.8, corridor_width=0.5)
+            if self.phase == "PHASE_2_CORRIDOR_APPROACH":
                 if pos_y >= 3.5:
                     self.phase = "PHASE_3_APERTURE_INGRESS"
                     print("🚪 [INGRESS ARMED] Traversing inner clearance envelope -> PHASE_3_APERTURE_INGRESS")
+                else:
+                    diagnosis = "Approaching Left Window along HUD approach glidepath vector"
+                    wc = WaypointCommand(mode="world", target=[0.0, 3.8, 1.10], yaw_deg=90.0, max_velocity=0.8, corridor_width=0.5)
 
-            elif self.phase == "PHASE_3_APERTURE_INGRESS":
-                diagnosis = "Passing through Left Window with safety envelope clamping (tilt <= 12°, vel <= 0.6 m/s)"
-                wc = WaypointCommand(mode="world", target=[0.0, 5.8, 1.10], yaw_deg=90.0, max_velocity=0.6, corridor_width=0.4)
-                max_tilt = 12.0
+            if self.phase == "PHASE_3_APERTURE_INGRESS":
                 if pos_y >= 5.3:
                     self.phase = "PHASE_5_EGRESS_STABILIZE"
                     print("🏆 [MISSION COMPLETE] Successfully traversed Left Window aperture!")
+                else:
+                    diagnosis = "Passing through Left Window with safety envelope clamping (tilt <= 12°, vel <= 0.6 m/s)"
+                    wc = WaypointCommand(mode="world", target=[0.0, 5.8, 1.10], yaw_deg=90.0, max_velocity=0.6, corridor_width=0.4)
+                    max_tilt = 12.0
 
-            else:  # PHASE_5_EGRESS_STABILIZE
+            if self.phase == "PHASE_5_EGRESS_STABILIZE":
                 diagnosis = "Aperture traversal complete; station-keeping hover on outer perimeter"
                 wc = WaypointCommand(mode="world", target=[0.0, 6.0, 1.10], yaw_deg=90.0)
                 self.mission_complete = True
@@ -447,35 +466,40 @@ class AutonomousTargetNavigator:
         # ----------------------------------------------------------------------
         elif self.target_mission in ("arch", "traverse_arch"):
             if self.phase == "PHASE_0_LIFTOFF":
-                diagnosis = "Liftoff to arch centerline altitude (Z=0.90m)"
-                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 0.90], yaw_deg=0.0)
                 if abs(alt - 0.90) < 0.08 and sim_time > 1.0:
                     self.phase = "PHASE_1_SECTOR_SCAN"
                     print("👁️ [ACTIVE PERCEPTION] Arch unobservable in forward FOV -> In-Place Yaw Saccade (-90° Right)")
+                else:
+                    diagnosis = "Liftoff to arch centerline altitude (Z=0.90m)"
+                    wc = WaypointCommand(mode="world", target=[0.0, 0.0, 0.90], yaw_deg=0.0)
 
-            elif self.phase == "PHASE_1_SECTOR_SCAN":
-                diagnosis = "Active saccade: in-place yaw rotation -90° to visually acquire Right Arch"
-                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 0.90], yaw_deg=-90.0, max_velocity=0.6)
-                if abs(yaw - (-90.0)) < 3.0 or abs(yaw - 270.0) < 3.0:
+            if self.phase == "PHASE_1_SECTOR_SCAN":
+                yaw_err = min(abs(yaw - (-90.0)), abs(yaw - 270.0))
+                if yaw_err < 4.0:
                     self.phase = "PHASE_2_CORRIDOR_APPROACH"
                     print("✅ [TARGET ACQUIRED] Right Arch framed in HUD -> PHASE_2_CORRIDOR_APPROACH")
+                else:
+                    diagnosis = "Active saccade: in-place yaw rotation -90° to visually acquire Right Arch"
+                    wc = WaypointCommand(mode="world", target=[0.0, 0.0, 0.90], yaw_deg=-90.0, max_velocity=0.6)
 
-            elif self.phase == "PHASE_2_CORRIDOR_APPROACH":
-                diagnosis = "Approaching Right Arch along HUD approach glidepath vector"
-                wc = WaypointCommand(mode="world", target=[0.0, -3.8, 0.90], yaw_deg=-90.0, max_velocity=0.8, corridor_width=0.5)
+            if self.phase == "PHASE_2_CORRIDOR_APPROACH":
                 if pos_y <= -3.5:
                     self.phase = "PHASE_3_APERTURE_INGRESS"
                     print("⛩️ [INGRESS ARMED] Traversing arch inner envelope -> PHASE_3_APERTURE_INGRESS")
+                else:
+                    diagnosis = "Approaching Right Arch along HUD approach glidepath vector"
+                    wc = WaypointCommand(mode="world", target=[0.0, -3.8, 0.90], yaw_deg=-90.0, max_velocity=0.8, corridor_width=0.5)
 
-            elif self.phase == "PHASE_3_APERTURE_INGRESS":
-                diagnosis = "Passing through Right Arch opening (tilt <= 12°, vel <= 0.6 m/s)"
-                wc = WaypointCommand(mode="world", target=[0.0, -5.8, 0.90], yaw_deg=-90.0, max_velocity=0.6, corridor_width=0.4)
-                max_tilt = 12.0
+            if self.phase == "PHASE_3_APERTURE_INGRESS":
                 if pos_y <= -5.3:
                     self.phase = "PHASE_5_EGRESS_STABILIZE"
                     print("🏆 [MISSION COMPLETE] Successfully traversed Right Arch aperture!")
+                else:
+                    diagnosis = "Passing through Right Arch opening (tilt <= 12°, vel <= 0.6 m/s)"
+                    wc = WaypointCommand(mode="world", target=[0.0, -5.8, 0.90], yaw_deg=-90.0, max_velocity=0.6, corridor_width=0.4)
+                    max_tilt = 12.0
 
-            else:  # PHASE_5_EGRESS_STABILIZE
+            if self.phase == "PHASE_5_EGRESS_STABILIZE":
                 diagnosis = "Arch traversal complete; station-keeping hover on outer perimeter"
                 wc = WaypointCommand(mode="world", target=[0.0, -6.0, 0.90], yaw_deg=-90.0)
                 self.mission_complete = True
@@ -485,23 +509,22 @@ class AutonomousTargetNavigator:
         # ----------------------------------------------------------------------
         elif self.target_mission in ("alpha_pole", "pole", "runway_pole", "runway_poles", "poles"):
             if self.phase == "PHASE_0_LIFTOFF":
-                diagnosis = "Liftoff to nominal hover altitude (Z=1.0m)"
-                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
                 if abs(alt - 1.0) < 0.08 and sim_time > 1.0:
                     self.phase = "PHASE_2_CORRIDOR_APPROACH"
                     print("🚀 [PHASE TRANSITION] Liftoff complete -> PHASE_2_CORRIDOR_APPROACH")
+                else:
+                    diagnosis = "Liftoff to nominal hover altitude (Z=1.0m)"
+                    wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
 
-            elif self.phase == "PHASE_2_CORRIDOR_APPROACH":
-                if pos_x < 3.2:
+            if self.phase == "PHASE_2_CORRIDOR_APPROACH":
+                if pos_x >= 3.2:
+                    self.phase = "PHASE_4_PRECISION_HOVER"
+                    print("🎯 [PHASE TRANSITION] Runway poles reached -> PHASE_4_PRECISION_HOVER")
+                else:
                     diagnosis = "Advancing to runway pylon entrance corridor"
                     wc = WaypointCommand(mode="world", target=[3.5, 0.0, 1.0], yaw_deg=0.0, max_velocity=1.0, corridor_width=0.5)
-                else:
-                    self.phase = "PHASE_4_PRECISION_HOVER"
-                    diagnosis = "Arrived at runway gate -> Centered hover between runway poles"
-                    print("🎯 [PHASE TRANSITION] Runway poles reached -> PHASE_4_PRECISION_HOVER")
-                    wc = WaypointCommand(mode="world", target=[3.5, 0.0, 1.0], yaw_deg=0.0, max_velocity=0.4, corridor_width=0.4)
 
-            else:  # PHASE_4_PRECISION_HOVER
+            if self.phase == "PHASE_4_PRECISION_HOVER":
                 diagnosis = "Holding precision station-keeping hover centered between runway poles (Y=±0.9m)"
                 wc = WaypointCommand(mode="world", target=[3.5, 0.0, 1.0], yaw_deg=0.0, max_velocity=0.4, corridor_width=0.4)
                 if abs(pos_x - 3.5) < 0.15 and abs(pos_y) < 0.15:
@@ -540,7 +563,7 @@ class AutonomousTargetNavigator:
         candidate_patch = self._visual_inertial_reasoner(telemetry, sim_time)
 
         # 2. Check if System 2 VLM reasoning is necessary
-        vlm_needed, trigger_reason = self.should_query_vlm(telemetry, sim_time)
+        vlm_needed, trigger_reason = self.should_query_vlm(telemetry, sim_time, candidate_patch)
 
         patch: Optional[System2Patch] = None
         vlm_invoked = False
@@ -561,10 +584,13 @@ class AutonomousTargetNavigator:
             # Update condition tracking
             self.last_vlm_call_time = sim_time
             self._prev_phase = self.phase
+            if patch and patch.waypoint_command and patch.waypoint_command.target:
+                self._prev_waypoint_target = np.array(patch.waypoint_command.target[:3], dtype=np.float32)
             f_dist = telemetry.get("unmodeled_force_disturbance_N", [0.0, 0.0, 0.0])
             self._last_vlm_force_norm = float(np.linalg.norm(f_dist))
+            smoothed_pos = getattr(self.sim.controller, "smoothed_target_pos", self.sim.controller.target_pos)
             curr_pos = self.sim.data.qpos[0:3]
-            self._last_vlm_pos_err = float(np.linalg.norm(self.sim.controller.target_pos - curr_pos))
+            self._last_vlm_pos_err = float(np.linalg.norm(smoothed_pos - curr_pos))
 
             # Inject patch into System 1 controller via bridge
             self.sim.bridge.apply_system2_patch(patch)
@@ -595,7 +621,7 @@ class AutonomousTargetNavigator:
             self.sim.data.xfrc_applied[drone_id, 0] = 5.0  # +X wind
         elif self.chaos_type == "motor" and sim_time >= 1.5:
             # Motor 1 degradation (40% power)
-            self.sim.chaos.active_chaos = "motor_failure"
+            self.sim.chaos.active_chaos["motor_failure"] = True
 
     def run_headless(self, max_duration: float = 12.0) -> bool:
         """Runs headless simulation with telemetry reporting."""
@@ -638,14 +664,17 @@ def main():
         "--target",
         type=str,
         default="alpha",
-        choices=["alpha", "delta", "window", "arch", "grand_tour"],
-        help="Target mission: 'alpha' (Pad Alpha), 'delta' (Pedestal Delta), 'window' (Left Window), 'arch' (Right Arch)",
+        choices=["alpha", "delta", "window", "arch", "grand_tour", "runway_poles", "poles", "alpha_pole"],
+        help="Target mission: 'alpha' (Pad Alpha), 'delta' (Pedestal Delta), 'runway_poles' (Runway Gate), 'window' (Left Window), 'arch' (Right Arch)",
     )
     parser.add_argument("--use-vlm", "--use-llm", action="store_true", dest="use_vlm", help="Query live Gemini Multimodal VLM")
     parser.add_argument("--model", type=str, default="gemini-3.5-flash-lite", help="VLM Model override")
     parser.add_argument("--chaos", type=str, default=None, choices=["wind", "motor", "noise"], help="Inject physical chaos")
-    parser.add_argument("--duration", type=float, default=14.0, help="Max simulation duration (seconds)")
+    parser.add_argument("--duration", type=float, default=None, help="Max simulation duration (seconds). Defaults to 24s for window/arch, 14s otherwise.")
     args = parser.parse_args()
+
+    default_duration = 24.0 if args.target in ("window", "arch", "grand_tour") else 14.0
+    duration = args.duration if args.duration is not None else default_duration
 
     drone_cfg = DroneConfig(spawn_pos=[0.0, 0.0, 0.8])
     sim = DroneSimulator(scene_path=SCENE_PATH, drone_cfg=drone_cfg)
@@ -659,7 +688,7 @@ def main():
     )
 
     if args.headless:
-        success = navigator.run_headless(max_duration=args.duration)
+        success = navigator.run_headless(max_duration=duration)
         sys.exit(0 if success else 1)
     else:
         print("Launching interactive visualizer...")
