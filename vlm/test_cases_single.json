@@ -1,0 +1,721 @@
+[
+  {
+    "id": "SD-01",
+    "name": "Nominal Pad Alpha Hover & Alignment",
+    "category": "Visual Navigation & Alignment",
+    "image_path": "vlm/test_cases_single/sd_01_nominal_pad_alpha.jpg",
+    "instruction": "Maintain nominal flight alignment toward Target Pad Alpha along the forward corridor, hold 1.0m altitude, and advance smoothly.",
+    "telemetry": {
+      "altitude_m": 1.0,
+      "velocity_body_mps": [
+        0.02,
+        0.0,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "gyro_rms_radps": [
+        0.08,
+        0.1,
+        0.06
+      ]
+    },
+    "ground_truth": {
+      "diagnosis": "Nominal flight aligned with Target Pad Alpha along forward corridor",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          2.0,
+          0.0,
+          0.0
+        ],
+        "yaw_deg": 0.0,
+        "max_velocity": 1.0,
+        "corridor_width": 0.6
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 20.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "range",
+        "min": 1.0,
+        "max": 3.0,
+        "desc": "Commands forward progress toward Target Pad Alpha"
+      },
+      {
+        "field": "waypoint_command.target[1]",
+        "type": "abs_max",
+        "max": 0.3,
+        "desc": "Maintains centered corridor lane"
+      },
+      {
+        "field": "waypoint_command.target[2]",
+        "type": "abs_max",
+        "max": 0.2,
+        "desc": "Maintains level 1.0m hover altitude"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "Zero feedforward force during calm nominal flight"
+      },
+      {
+        "field": "motor_trim_scale",
+        "type": "ones_vector",
+        "desc": "Nominal motor trims during unperturbed flight"
+      }
+    ]
+  },
+  {
+    "id": "SD-02",
+    "name": "Elevated Pedestal Delta Hover Acquisition",
+    "category": "Elevated Target Acquisition",
+    "image_path": "vlm/test_cases_single/sd_02_elevated_pedestal_delta.jpg",
+    "instruction": "Approach Elevated Pedestal Delta and command hover waypoint directly over the platform disc (clearance 0.35m above platform top).",
+    "telemetry": {
+      "altitude_m": 1.05,
+      "velocity_body_mps": [
+        0.08,
+        0.0,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": -0.5,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.26,
+        3.26,
+        3.24,
+        3.24
+      ],
+      "gyro_rms_radps": [
+        0.1,
+        0.12,
+        0.07
+      ]
+    },
+    "ground_truth": {
+      "diagnosis": "Approaching Elevated Pedestal Delta platform, commanding elevated target hover",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          2.5,
+          0.0,
+          0.0
+        ],
+        "yaw_deg": 0.0,
+        "max_velocity": 0.8,
+        "corridor_width": 0.5
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 18.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "range",
+        "min": 1.5,
+        "max": 3.5,
+        "desc": "Advances forward onto Elevated Pedestal Delta platform"
+      },
+      {
+        "field": "waypoint_command.target[1]",
+        "type": "abs_max",
+        "max": 0.35,
+        "desc": "Remains aligned with center of elevated pedestal disc"
+      },
+      {
+        "field": "waypoint_command.target[2]",
+        "type": "range",
+        "min": -0.3,
+        "max": 0.3,
+        "desc": "Maintains safe elevated clearance above platform"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "Zero feedforward force during calm elevated acquisition"
+      },
+      {
+        "field": "motor_trim_scale",
+        "type": "ones_vector",
+        "desc": "Nominal motor trims during platform acquisition"
+      }
+    ]
+  },
+  {
+    "id": "SD-03",
+    "name": "Lateral Offset to Target Pad Bravo",
+    "category": "Lateral Target Tracking",
+    "image_path": "vlm/test_cases_single/sd_03_lateral_offset_pad_bravo.jpg",
+    "instruction": "Navigate toward Target Pad Bravo on the forward-left flank (Cyan / Blue multi-ring pad), adjusting heading and commanding left-lateral waypoint tracking.",
+    "telemetry": {
+      "altitude_m": 1.0,
+      "velocity_body_mps": [
+        0.04,
+        0.01,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 35.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "gyro_rms_radps": [
+        0.09,
+        0.11,
+        0.08
+      ]
+    },
+    "ground_truth": {
+      "diagnosis": "Visual acquisition of cyan Target Pad Bravo, vectoring forward-left",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          2.2,
+          0.8,
+          0.0
+        ],
+        "yaw_deg": 15.0,
+        "max_velocity": 1.0,
+        "corridor_width": 0.7
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 22.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "range",
+        "min": 1.0,
+        "max": 3.5,
+        "desc": "Advances forward toward Pad Bravo"
+      },
+      {
+        "field": "waypoint_command.target[1]",
+        "type": "range",
+        "min": 0.2,
+        "max": 2.0,
+        "desc": "Vectors laterally left toward Pad Bravo (+Y)"
+      },
+      {
+        "field": "waypoint_command.yaw_deg",
+        "type": "range",
+        "min": 0.0,
+        "max": 35.0,
+        "desc": "Aligns heading counter-clockwise toward Target Pad Bravo"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "No feedforward offset during unforced turn"
+      },
+      {
+        "field": "motor_trim_scale",
+        "type": "ones_vector",
+        "desc": "Nominal motor trims"
+      }
+    ]
+  },
+  {
+    "id": "SD-04",
+    "name": "Lateral Offset to Target Pad Charlie",
+    "category": "Lateral Target Tracking",
+    "image_path": "vlm/test_cases_single/sd_04_lateral_offset_pad_charlie.jpg",
+    "instruction": "Navigate toward Target Pad Charlie on the forward-right flank (Emerald green pad), adjusting heading and commanding right-lateral waypoint tracking.",
+    "telemetry": {
+      "altitude_m": 1.0,
+      "velocity_body_mps": [
+        0.04,
+        -0.01,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": -35.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "gyro_rms_radps": [
+        0.09,
+        0.11,
+        0.08
+      ]
+    },
+    "ground_truth": {
+      "diagnosis": "Visual acquisition of emerald Target Pad Charlie, vectoring forward-right",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          2.2,
+          -0.8,
+          0.0
+        ],
+        "yaw_deg": -15.0,
+        "max_velocity": 1.0,
+        "corridor_width": 0.7
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 22.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "range",
+        "min": 1.0,
+        "max": 3.5,
+        "desc": "Advances forward toward Pad Charlie"
+      },
+      {
+        "field": "waypoint_command.target[1]",
+        "type": "range",
+        "min": -2.0,
+        "max": -0.2,
+        "desc": "Vectors laterally right toward Pad Charlie (-Y)"
+      },
+      {
+        "field": "waypoint_command.yaw_deg",
+        "type": "range",
+        "min": -35.0,
+        "max": 0.0,
+        "desc": "Aligns heading clockwise toward Target Pad Charlie"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "No feedforward offset during unforced turn"
+      },
+      {
+        "field": "motor_trim_scale",
+        "type": "ones_vector",
+        "desc": "Nominal motor trims"
+      }
+    ]
+  },
+  {
+    "id": "SD-05",
+    "name": "Pylon Gate Obstacle Traversal",
+    "category": "Obstacle Traversal",
+    "image_path": "vlm/test_cases_single/sd_05_pylon_gate_traversal.jpg",
+    "instruction": "Traverse through the center of the pylon obstacle gate, hold zero lateral drift (stay centered between left and right pylons), and maintain 1.0m altitude.",
+    "telemetry": {
+      "altitude_m": 1.0,
+      "velocity_body_mps": [
+        0.03,
+        0.0,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "gyro_rms_radps": [
+        0.09,
+        0.1,
+        0.07
+      ]
+    },
+    "ground_truth": {
+      "diagnosis": "Approaching pylon gate obstacle; maintaining centered lane through passage",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          2.0,
+          0.0,
+          0.0
+        ],
+        "yaw_deg": 0.0,
+        "max_velocity": 0.8,
+        "corridor_width": 0.5
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 18.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "range",
+        "min": 1.2,
+        "max": 2.5,
+        "desc": "Commands forward progress through gate passage"
+      },
+      {
+        "field": "waypoint_command.target[1]",
+        "type": "abs_max",
+        "max": 0.25,
+        "desc": "Maintains strict lateral centering to avoid striking pylons"
+      },
+      {
+        "field": "waypoint_command.corridor_width",
+        "type": "range",
+        "min": 0.2,
+        "max": 0.6,
+        "desc": "Restricts safety corridor width within pylon clearance"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "Zero feedforward force during calm corridor flight"
+      },
+      {
+        "field": "motor_trim_scale",
+        "type": "ones_vector",
+        "desc": "Nominal motor trims"
+      }
+    ]
+  },
+  {
+    "id": "SD-06",
+    "name": "Target Pad Alpha Station-Keeping under Wind Gust",
+    "category": "Disturbance Rejection",
+    "image_path": "vlm/test_cases_single/sd_06_target_alpha_wind_gust.jpg",
+    "instruction": "Station-keep over Target Pad Alpha against strong headwind gust (+5.2N along +X). Inject opposing feedforward force to maintain position.",
+    "telemetry": {
+      "altitude_m": 1.0,
+      "velocity_body_mps": [
+        0.02,
+        0.0,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": -14.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        5.2,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.65,
+        3.65,
+        2.85,
+        2.85
+      ],
+      "gyro_rms_radps": [
+        0.18,
+        0.22,
+        0.12
+      ]
+    },
+    "ground_truth": {
+      "diagnosis": "Persistent headwind disturbance (+5.2N along +X); injecting opposing feedforward",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "yaw_deg": 0.0,
+        "max_velocity": 0.5,
+        "corridor_width": 0.4
+      },
+      "feedforward_force_offset": [
+        -5.2,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.2,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 25.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "feedforward_force_offset[0]",
+        "type": "range",
+        "min": -5.5,
+        "max": -4.8,
+        "desc": "Injects opposing feedforward force dFx in [-5.5, -4.8] N to cancel +5.2N wind"
+      },
+      {
+        "field": "feedforward_force_offset[1]",
+        "type": "abs_max",
+        "max": 0.3,
+        "desc": "Zero lateral feedforward force"
+      },
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "abs_max",
+        "max": 0.5,
+        "desc": "Holds station hover rather than forward drift"
+      },
+      {
+        "field": "motor_trim_scale",
+        "type": "ones_vector",
+        "desc": "Nominal motor trims during wind disturbance"
+      }
+    ]
+  },
+  {
+    "id": "SD-07",
+    "name": "Degraded Motor Hover over Target Pad",
+    "category": "Actuator Failure Compensation",
+    "image_path": "vlm/test_cases_single/sd_07_degraded_motor_hover.jpg",
+    "instruction": "Compensate for Motor 1 actuator degradation (40% power output) while holding hover over Target Pad Alpha. Apply motor trim scale and tighten safety tilt.",
+    "telemetry": {
+      "altitude_m": 0.95,
+      "velocity_body_mps": [
+        0.01,
+        0.01,
+        -0.01
+      ],
+      "attitude_deg": {
+        "roll": 6.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        5.8,
+        2.9,
+        2.9,
+        2.9
+      ],
+      "gyro_rms_radps": [
+        0.25,
+        0.15,
+        0.12
+      ]
+    },
+    "ground_truth": {
+      "diagnosis": "Motor 1 severely degraded at 40% efficiency; applying 2.50x motor trim scale",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "yaw_deg": 0.0,
+        "max_velocity": 0.5,
+        "corridor_width": 0.4
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        2.5,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 18.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "motor_trim_scale[0]",
+        "type": "range",
+        "min": 2.3,
+        "max": 2.5,
+        "desc": "Boosts Motor 1 trim scale to [2.3, 2.5] to restore 40% power loss"
+      },
+      {
+        "field": "motor_trim_scale[1]",
+        "type": "range",
+        "min": 0.9,
+        "max": 1.1,
+        "desc": "Maintains Motor 2 nominal trim"
+      },
+      {
+        "field": "motor_trim_scale[2]",
+        "type": "range",
+        "min": 0.9,
+        "max": 1.1,
+        "desc": "Maintains Motor 3 nominal trim"
+      },
+      {
+        "field": "motor_trim_scale[3]",
+        "type": "range",
+        "min": 0.9,
+        "max": 1.1,
+        "desc": "Maintains Motor 4 nominal trim"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "No external wind feedforward required during motor failure"
+      },
+      {
+        "field": "safety_envelope.max_tilt_deg",
+        "type": "range",
+        "min": 15.0,
+        "max": 20.0,
+        "desc": "Tightens maximum allowable tilt envelope during degraded actuator flight"
+      }
+    ]
+  }
+]

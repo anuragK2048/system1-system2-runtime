@@ -8,10 +8,20 @@ This directory provides standalone scripts to test **local multimodal vision-lan
 
 ```
 vlm/
-├── grab_sample_frame.py    # Renders a 480x360 FPV frame from assets/skydio_x2/dual_scene.xml
-├── sample_fpv.jpg          # Generated test frame from the drone's onboard camera (d2_fpv)
+├── hud_overlay.py          # High-performance calibrated HUD projection helper (ground rings, horizon, 3D apertures)
+├── demo_hud_projection.py  # Visual demonstrator producing neutral, pitched, and banked FPV frames
+├── demo_outputs/           # Rendered demonstration frames with burned HUD overlays
+├── grab_sample_frame.py    # Renders calibrated 480x360 FPV frame from assets/skydio_x2/dual_scene.xml
+├── sample_fpv.jpg          # Generated test frame with metric rings, horizon, and flight telemetry
+├── evaluate_model.py       # Automated benchmark evaluator across test suites
+├── generate_test_suite.py  # Canonical 6 test cases (TC-01..06) generator
+├── generate_new_test_suite.py # Out-of-sample 6 test cases (TC-07..12) generator
+├── test_gemini_vlm.py      # Cloud test runner for Google Gemini Flash Lite
 ├── test_qwen_ollama.py     # Tests Qwen2.5-VL via local Ollama OpenAI-compatible API
 ├── test_qwen_mlx.py        # Tests Qwen2.5-VL via Apple Silicon native MLX-VLM (sub-300ms)
+├── test_cloud_vlm.py       # Tests Fireworks / OpenAI vision models
+├── modal_qwen_vlm.py       # Dedicated serverless L4 GPU app for Modal
+├── test_modal_client.py    # Client for querying deployed Modal endpoint
 └── README.md               # This guide
 ```
 
@@ -70,6 +80,40 @@ uv pip install mlx-vlm
 uv run python vlm/test_qwen_mlx.py
 ```
 *The script automatically downloads `mlx-community/Qwen2.5-VL-3B-Instruct-4bit` from Hugging Face on first run and benchmarks raw Metal GPU execution time.*
+
+---
+
+## Calibrated HUD Projection & Spatial Grounding (`vlm/hud_overlay.py`)
+
+Raw camera pixels are prone to depth ambiguity and scale confusion for Vision-Language Models. The **`HUDProjector`** burns perspective-accurate metric ground rings, an artificial horizon, and 3D passage aperture frames directly onto the FPV image before feeding it to the VLM:
+
+### Key Capabilities:
+1. **Metric Ground Rings (1m, 2m, 3m, 4m)**:
+   - Projects concentric circles on the ground plane ($Z=0$) centered at the drone's nadir projection.
+   - Handled with near-plane line clipping ($Z_c \le 0.05$m) to prevent perspective inversion.
+   - Distance labels (`"1m"`, `"2m"`, `"3m"`) burned along the flightpath corridor.
+2. **Artificial Horizon & Pitch Ladder**:
+   - Calculated analytically from camera rotation matrix (`cam_xmat`):
+     $$\frac{\text{right}_z}{f_x}(u - c_x) - \frac{\text{up}_z}{f_y}(v - c_y) + \text{forward}_z = 0$$
+   - Displays boresight aircraft reticle and pitch ladder ticks at $\pm 10^\circ, \pm 20^\circ$.
+3. **3D Portals, Apertures & Gates (Doors, Windows, Arches, Hoops)**:
+   - Extensible `Aperture3D` data class defining arbitrary 3D openings.
+   - Automatically projects outer frame, inner rotor-clearance green envelope, central bullseye reticle, and 3D approach glidepath vector.
+   - Auto-discovers obstacles from MuJoCo bodies/sites matching `gate_*`, `door_*`, `window_*`, `arch_*`.
+4. **Flight Telemetry Ribbon**:
+   - Displays real-time altitude, airspeed, pitch, roll, and heading.
+
+### Run the Visual Demonstrator:
+```bash
+uv run python vlm/demo_hud_projection.py
+```
+Outputs are saved to `vlm/demo_outputs/`:
+- `demo_hud_neutral.jpg`: Neutral hover facing an Arch Gate at $X=2.5$m.
+- `demo_hud_pitch_down.jpg`: Pitched forward flight ($-12^\circ$ pitch) facing an elevated Window Aperture.
+- `demo_hud_banked.jpg`: Banked turn ($+18^\circ$ roll) facing a Doorway with clearance margin.
+
+### Performance:
+- Pure vector projection + PIL rendering executes in **~3.5 ms (280+ FPS)**, seamlessly fitting within the 1–5 Hz System 2 loop without impacting the 500 Hz reflex controller.
 
 ---
 
