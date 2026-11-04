@@ -123,10 +123,19 @@ class AutonomousTargetNavigator:
         self.phase_complete = False
         self.mission_complete = False
 
-        # Visual telemetry history
+        # Visual telemetry history and event-driven VLM invocation tracking
         self.last_s2_time = -1.0
-        self.s2_interval = 0.5  # 2 Hz System 2 cognitive update
+        self.s2_interval = 0.5  # 2 Hz System 2 cognitive update check
         self.flight_log: List[dict] = []
+
+        # Condition-based VLM trigger state
+        self.last_vlm_call_time = -1.0
+        self.vlm_heartbeat_s = 3.0        # Max interval in transit before periodic visual check
+        self.calm_hover_heartbeat_s = 5.0  # Max interval during steady hover hold
+        self._prev_phase = self.phase
+        self._last_vlm_force_norm = 0.0
+        self._last_vlm_pos_err = 0.0
+        self._vlm_call_count = 0
 
     def close(self):
         """Releases renderer resources."""
@@ -239,6 +248,72 @@ class AutonomousTargetNavigator:
         except Exception as e:
             print(f"⚠️ [VLM QUERY EXCEPTION] {e}")
         return None
+
+    def should_query_vlm(self, telemetry: dict, sim_time: float) -> Tuple[bool, str]:
+        """Evaluates whether an expensive multimodal VLM call is necessary.
+
+        Triggers conditionally on:
+        1. Mission initialization / visual scene grounding (first cycle).
+        2. Flight phase / leg transitions (milestone advancement).
+        3. Force disturbance anomalies (L1 observer residual spiked > 1.8N or delta > 1.0N).
+        4. Actuator degradation / motor failure (thrust asymmetry > 1.8N).
+        5. Position tracking error excursions (> 0.35m).
+        6. Excessive attitude tilt (> 20.0 deg).
+        7. Gyro chatter / oscillation (> 0.8 rad/s).
+        8. Heartbeat sanity check (every 3.0s in active transit, 5.0s in calm hover).
+
+        Bypasses redundant VLM calls when holding stable reflexive station-keeping.
+        """
+        # 1. First cognitive call at mission start
+        if self.last_vlm_call_time < 0.0:
+            return True, "Initial mission assessment and visual scene grounding"
+
+        # 2. Flight phase transition or waypoint arrival
+        if self.phase != self._prev_phase:
+            return True, f"Flight phase transition: {self._prev_phase} -> {self.phase}"
+
+        # 3. External force disturbance (wind gust / microburst onset or cessation)
+        f_dist = telemetry.get("unmodeled_force_disturbance_N", [0.0, 0.0, 0.0])
+        f_norm = float(np.linalg.norm(f_dist))
+        if f_norm > 1.8 and abs(f_norm - self._last_vlm_force_norm) > 1.0:
+            return True, f"L1 force disturbance spike ({f_norm:.1f}N) exceeds threshold (1.8N)"
+        if self._last_vlm_force_norm > 1.8 and f_norm < 0.8:
+            return True, f"L1 force disturbance cleared ({f_norm:.1f}N < 0.8N), returning to calm hover"
+
+        # 4. Actuator degradation / motor failure
+        m_ctrl = telemetry.get("motor_controls_N", [3.25, 3.25, 3.25, 3.25])
+        m_spread = float(max(m_ctrl) - min(m_ctrl))
+        if m_spread > 1.8 and m_ctrl[0] > 4.5:
+            return True, f"Actuator command asymmetry ({max(m_ctrl):.1f}N vs {min(m_ctrl):.1f}N) indicates motor degradation"
+
+        # 5. Position tracking excursion
+        target_pos = self.sim.controller.target_pos
+        curr_pos = self.sim.data.qpos[0:3]
+        pos_err = float(np.linalg.norm(target_pos - curr_pos))
+        if pos_err > 0.35 and abs(pos_err - self._last_vlm_pos_err) > 0.20:
+            return True, f"Position tracking error ({pos_err:.2f}m) exceeds threshold (0.35m)"
+
+        # 6. Total attitude tilt excursion
+        att = telemetry.get("attitude_deg", {})
+        roll = abs(float(att.get("roll", 0.0)))
+        pitch = abs(float(att.get("pitch", 0.0)))
+        tilt_est = float(np.hypot(roll, pitch))
+        if tilt_est > 20.0:
+            return True, f"Attitude tilt ({tilt_est:.1f}°) exceeds threshold (20.0°)"
+
+        # 7. Gyro chatter / oscillation
+        gyro_rms = float(np.linalg.norm(telemetry.get("gyro_rms_radps", [0, 0, 0])))
+        if gyro_rms > 0.8:
+            return True, f"Gyro oscillation ({gyro_rms:.2f} rad/s) exceeds threshold (0.8 rad/s)"
+
+        # 8. Heartbeat sanity check (longer interval during calm hover)
+        is_hover = (self.phase in ("PHASE_4_PRECISION_HOVER", "PHASE_5_EGRESS_STABILIZE")) and (pos_err < 0.15)
+        heartbeat_limit = self.calm_hover_heartbeat_s if is_hover else self.vlm_heartbeat_s
+        time_since_vlm = sim_time - self.last_vlm_call_time
+        if time_since_vlm >= heartbeat_limit:
+            return True, f"Periodic visual heartbeat check ({time_since_vlm:.1f}s elapsed)"
+
+        return False, "Nominal flight within tolerance; reflexive hold active"
 
     def _visual_inertial_reasoner(self, telemetry: dict, sim_time: float) -> System2Patch:
         """Deterministic System 2 reasoner driven strictly by onboard telemetry and visual phase state."""
@@ -405,6 +480,33 @@ class AutonomousTargetNavigator:
                 wc = WaypointCommand(mode="world", target=[0.0, -6.0, 0.90], yaw_deg=-90.0)
                 self.mission_complete = True
 
+        # ----------------------------------------------------------------------
+        # MISSION 5: RUNWAY POLES (Alpha Gate Entrance)
+        # ----------------------------------------------------------------------
+        elif self.target_mission in ("alpha_pole", "pole", "runway_pole", "runway_poles", "poles"):
+            if self.phase == "PHASE_0_LIFTOFF":
+                diagnosis = "Liftoff to nominal hover altitude (Z=1.0m)"
+                wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
+                if abs(alt - 1.0) < 0.08 and sim_time > 1.0:
+                    self.phase = "PHASE_2_CORRIDOR_APPROACH"
+                    print("🚀 [PHASE TRANSITION] Liftoff complete -> PHASE_2_CORRIDOR_APPROACH")
+
+            elif self.phase == "PHASE_2_CORRIDOR_APPROACH":
+                if pos_x < 3.2:
+                    diagnosis = "Advancing to runway pylon entrance corridor"
+                    wc = WaypointCommand(mode="world", target=[3.5, 0.0, 1.0], yaw_deg=0.0, max_velocity=1.0, corridor_width=0.5)
+                else:
+                    self.phase = "PHASE_4_PRECISION_HOVER"
+                    diagnosis = "Arrived at runway gate -> Centered hover between runway poles"
+                    print("🎯 [PHASE TRANSITION] Runway poles reached -> PHASE_4_PRECISION_HOVER")
+                    wc = WaypointCommand(mode="world", target=[3.5, 0.0, 1.0], yaw_deg=0.0, max_velocity=0.4, corridor_width=0.4)
+
+            else:  # PHASE_4_PRECISION_HOVER
+                diagnosis = "Holding precision station-keeping hover centered between runway poles (Y=±0.9m)"
+                wc = WaypointCommand(mode="world", target=[3.5, 0.0, 1.0], yaw_deg=0.0, max_velocity=0.4, corridor_width=0.4)
+                if abs(pos_x - 3.5) < 0.15 and abs(pos_y) < 0.15:
+                    self.mission_complete = True
+
         else:
             raise ValueError(f"Unknown target mission: {self.target_mission}")
 
@@ -420,7 +522,12 @@ class AutonomousTargetNavigator:
         )
 
     def step_cognitive_cycle(self, sim_time: float) -> Optional[dict]:
-        """Runs the 2 Hz System 2 cognitive decision loop using sensors & FPV image only."""
+        """Runs the System 2 cognitive decision loop using sensors & FPV image only.
+        
+        Evaluates whether a VLM call is necessary. If necessary (startup, phase transition,
+        force disturbance, motor failure, or periodic heartbeat), queries the VLM reasoner.
+        Otherwise, maintains smooth reflexive station-keeping without wasteful calls.
+        """
         if sim_time - self.last_s2_time < self.s2_interval:
             return None
 
@@ -429,19 +536,42 @@ class AutonomousTargetNavigator:
         # 1. Read strictly onboard sensory telemetry
         telemetry = self.get_onboard_telemetry()
 
-        # 2. Capture live FPV frame with calibrated HUD overlay
-        _, img_path = self.capture_fpv_image_with_hud()
+        # Update candidate patch from visual-inertial reasoner to track phase state
+        candidate_patch = self._visual_inertial_reasoner(telemetry, sim_time)
 
-        # 3. Query reasoner (live VLM or deterministic visual-inertial reasoner)
+        # 2. Check if System 2 VLM reasoning is necessary
+        vlm_needed, trigger_reason = self.should_query_vlm(telemetry, sim_time)
+
         patch: Optional[System2Patch] = None
-        if self.use_vlm:
-            patch = self._query_live_vlm(img_path, telemetry)
+        vlm_invoked = False
 
-        if patch is None:
-            patch = self._visual_inertial_reasoner(telemetry, sim_time)
+        if vlm_needed:
+            # Capture live FPV frame with calibrated HUD overlay
+            _, img_path = self.capture_fpv_image_with_hud()
 
-        # 4. Inject patch into System 1 controller via bridge
-        self.sim.bridge.apply_system2_patch(patch)
+            if self.use_vlm:
+                print(f"🧠 [VLM TRIGGER] t={sim_time:.2f}s: Querying VLM Reasoner ({self.vlm_model}) -> {trigger_reason}")
+                patch = self._query_live_vlm(img_path, telemetry)
+                vlm_invoked = True
+                self._vlm_call_count += 1
+
+            if patch is None:
+                patch = candidate_patch
+
+            # Update condition tracking
+            self.last_vlm_call_time = sim_time
+            self._prev_phase = self.phase
+            f_dist = telemetry.get("unmodeled_force_disturbance_N", [0.0, 0.0, 0.0])
+            self._last_vlm_force_norm = float(np.linalg.norm(f_dist))
+            curr_pos = self.sim.data.qpos[0:3]
+            self._last_vlm_pos_err = float(np.linalg.norm(self.sim.controller.target_pos - curr_pos))
+
+            # Inject patch into System 1 controller via bridge
+            self.sim.bridge.apply_system2_patch(patch)
+        else:
+            # Reflexive hold: System 1 controller continues executing active patch with smoothing
+            active_patch = self.sim.bridge.get_active_patch()
+            patch = active_patch or candidate_patch
 
         # Telemetry logging
         log_entry = {
@@ -449,8 +579,10 @@ class AutonomousTargetNavigator:
             "phase": self.phase,
             "alt": telemetry["altitude_m"],
             "yaw": telemetry["attitude_deg"]["yaw"],
-            "diagnosis": patch.diagnosis,
-            "waypoint": patch.waypoint_command.to_dict() if patch.waypoint_command else None,
+            "diagnosis": patch.diagnosis if patch else "Reflexive hold",
+            "vlm_invoked": vlm_invoked,
+            "trigger_reason": trigger_reason if vlm_needed else "Reflexive hold within tolerance",
+            "waypoint": patch.waypoint_command.to_dict() if (patch and patch.waypoint_command) else None,
         }
         self.flight_log.append(log_entry)
         return log_entry

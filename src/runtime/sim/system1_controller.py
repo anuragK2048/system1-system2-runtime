@@ -123,6 +123,26 @@ class System1Controller:
         self._latched_waypoint_pos: Optional[np.ndarray] = None
         self._latched_waypoint_yaw: Optional[float] = None
 
+        # ----------------------------------------------------------------------
+        # Smoothing Filters for Navigation Instructions and Patch Transitions
+        # ----------------------------------------------------------------------
+        # 3D Position setpoint smoothing filter (acceleration-bounded reference trajectory)
+        self.smoothed_target_pos: np.ndarray = self.target_pos.copy().astype(np.float32)
+        self.smoothed_target_vel: np.ndarray = np.zeros(3, dtype=np.float32)
+        self.max_horiz_vel_m_s: float = 2.00    # Default horizontal cruise velocity limit
+        self.max_vert_vel_m_s: float = 1.00     # Default vertical climb/descent velocity limit
+        self.max_horiz_accel_m_s2: float = 2.50 # Maximum horizontal acceleration (bounded tilt)
+        self.max_vert_accel_m_s2: float = 2.00  # Maximum vertical acceleration
+        self.enable_position_smoothing: bool = True
+
+        # Continuous patch parameter smoothing filter (exponential moving average)
+        self.smoothed_ff: np.ndarray = np.zeros(3, dtype=np.float32)
+        self.smoothed_trim: np.ndarray = np.ones(4, dtype=np.float32)
+        self.smoothed_gains: np.ndarray = np.ones(4, dtype=np.float32)
+        self.smoothed_max_tilt_deg: float = L1_DEFAULT_MAX_TILT_DEG
+        self.patch_smoothing_tau_s: float = 0.15
+        self.enable_patch_smoothing: bool = False  # Enabled when ramp_duration_s > 0 or explicitly set
+
         # Persistent L1 Adaptive State for online disturbance estimation
         self.l1_state = L1AdaptiveState()
 
@@ -135,6 +155,71 @@ class System1Controller:
         self._latched_patch_id = None
         self._latched_waypoint_pos = None
         self._latched_waypoint_yaw = None
+        self.reset_smoothing_filters()
+
+    def reset_smoothing_filters(self, initial_pos: Optional[np.ndarray] = None) -> None:
+        """Resets all position and patch smoothing filters to initial baseline."""
+        if initial_pos is not None:
+            self.smoothed_target_pos = np.array(initial_pos, dtype=np.float32).copy()
+        else:
+            self.smoothed_target_pos = self.target_pos.copy().astype(np.float32)
+        self.smoothed_target_vel = np.zeros(3, dtype=np.float32)
+        self.smoothed_yaw_rad = float(self.target_yaw_rad)
+        self.smoothed_yaw_rate = 0.0
+        self.smoothed_ff = np.zeros(3, dtype=np.float32)
+        self.smoothed_trim = np.ones(4, dtype=np.float32)
+        self.smoothed_gains = np.ones(4, dtype=np.float32)
+        self.smoothed_max_tilt_deg = L1_DEFAULT_MAX_TILT_DEG
+
+    def _smooth_navigation_setpoint(
+        self,
+        target_pos: np.ndarray,
+        max_velocity: Optional[float],
+        max_tilt_deg: float,
+        dt: float,
+    ) -> np.ndarray:
+        """Applies a 2nd-order acceleration-bounded reference model to smooth position commands.
+        
+        Guarantees that step changes in waypoint commands are transitioned into a smooth,
+        continuous C1 reference trajectory without jerk, actuator saturation, or tilt spikes.
+        """
+        if not self.enable_position_smoothing:
+            self.smoothed_target_pos = target_pos.copy().astype(np.float32)
+            self.smoothed_target_vel = np.zeros(3, dtype=np.float32)
+            return self.smoothed_target_pos
+
+        v_max_xy = min(float(max_velocity), self.max_horiz_vel_m_s) if max_velocity else self.max_horiz_vel_m_s
+        v_max_z = self.max_vert_vel_m_s
+
+        # Bound acceleration to stay within commanded tilt envelope: a_horiz <= g * tan(max_tilt)
+        a_max_xy = min(float(9.81 * np.tan(np.radians(max_tilt_deg)) * 0.85), self.max_horiz_accel_m_s2)
+        a_max_xy = max(0.5, a_max_xy)
+        a_max_z = self.max_vert_accel_m_s2
+
+        pos_diff = target_pos - self.smoothed_target_pos
+        dist_xy = float(np.linalg.norm(pos_diff[:2]))
+        dist_z = abs(float(pos_diff[2]))
+
+        # Smooth deceleration profile: v_target = min(v_max, sqrt(2 * a * d), d / tau)
+        v_cmd_xy = np.zeros(2, dtype=np.float32)
+        if dist_xy > 1e-4:
+            v_mag = min(v_max_xy, np.sqrt(2.0 * a_max_xy * dist_xy), dist_xy / 0.30)
+            v_cmd_xy = (pos_diff[:2] / dist_xy) * v_mag
+
+        v_cmd_z = 0.0
+        if dist_z > 1e-4:
+            vz_mag = min(v_max_z, np.sqrt(2.0 * a_max_z * dist_z), dist_z / 0.30)
+            v_cmd_z = np.sign(pos_diff[2]) * vz_mag
+
+        v_cmd = np.array([v_cmd_xy[0], v_cmd_xy[1], v_cmd_z], dtype=np.float32)
+        acc_limit = np.array([a_max_xy, a_max_xy, a_max_z], dtype=np.float32)
+
+        v_err = v_cmd - self.smoothed_target_vel
+        v_step = np.clip(v_err, -acc_limit * dt, acc_limit * dt)
+        self.smoothed_target_vel += v_step
+        self.smoothed_target_pos += self.smoothed_target_vel * dt
+
+        return self.smoothed_target_pos
 
     def _resolve_active_patch(
         self,
@@ -318,16 +403,32 @@ class System1Controller:
             att_kp_mult,
             att_kd_mult,
             current_target_pos,
-            _,
+            resolved_max_tilt,
         ) = self._resolve_active_patch(sim_time, feedforward_force, motor_trim, target_pos, pos=pos, quat=quat)
 
         # ----------------------------------------------------------------------
-        # 2. Coordinate Transformation (MuJoCo ENU/NWU -> Mini-QuadLib NED)
+        # 2. Smooth Navigation Setpoint & Coordinate Transformation
         # ----------------------------------------------------------------------
+        active_patch = self.bridge.get_active_patch()
+        max_vel = None
+        if active_patch and active_patch.waypoint_command and active_patch.waypoint_command.max_velocity:
+            max_vel = float(active_patch.waypoint_command.max_velocity)
+
+        max_tilt_deg = L1_DEFAULT_MAX_TILT_DEG
+        if resolved_max_tilt is not None:
+            max_tilt_deg = resolved_max_tilt
+        elif (active_patch is not None and active_patch.safety_envelope is not None and active_patch.safety_envelope.max_tilt_deg is not None):
+            max_tilt_deg = float(active_patch.safety_envelope.max_tilt_deg)
+
+        # Smooth position setpoint via 2nd-order trajectory reference model
+        smoothed_target = self._smooth_navigation_setpoint(
+            current_target_pos, max_velocity=max_vel, max_tilt_deg=max_tilt_deg, dt=dt
+        )
+        desired_pos_ned = self._T @ smoothed_target
+
         pos_ned = self._T @ pos
         vel_ned = self._T @ vel
         omega_ned = self._T @ omega
-        desired_pos_ned = self._T @ current_target_pos
 
         # Compute rotation matrix in MuJoCo from quaternion [w, x, y, z]
         w, qx, qy, qz = quat
@@ -512,6 +613,8 @@ class System1Controller:
             "target_yaw_deg": float(np.degrees(self.target_yaw_rad)),
             "smoothed_yaw_deg": float(np.degrees(self.smoothed_yaw_rad)),
             "current_yaw_deg": float(yaw_deg),
+            "smoothed_target_pos": [float(x) for x in self.smoothed_target_pos],
+            "smoothed_target_vel": [float(x) for x in self.smoothed_target_vel],
         }
 
         return motor_thrusts, diagnostics
@@ -554,10 +657,15 @@ class System1Controller:
         self.smoothed_yaw_rate += rate_step
         self.smoothed_yaw_rad += self.smoothed_yaw_rate * dt
 
+        # Smooth position setpoint via reference model
+        smoothed_target = self._smooth_navigation_setpoint(
+            current_target_pos, max_velocity=None, max_tilt_deg=custom_max_tilt_deg or 25.0, dt=dt
+        )
+
         # Compute position error relative to setpoint
-        err_x = x - current_target_pos[0]
-        err_y = y - current_target_pos[1]
-        alt_error = current_target_pos[2] - z
+        err_x = x - smoothed_target[0]
+        err_y = y - smoothed_target[1]
+        alt_error = smoothed_target[2] - z
 
         # Altitude demand (collective thrust F_z)
         F_z = self.drone_cfg.total_hover_weight + (self.pid_cfg.kp_z * pos_kp_mult) * alt_error - (self.pid_cfg.kd_z * pos_kd_mult) * vz
@@ -642,5 +750,7 @@ class System1Controller:
             "target_yaw_deg": float(np.degrees(self.target_yaw_rad)),
             "smoothed_yaw_deg": float(np.degrees(self.smoothed_yaw_rad)),
             "current_yaw_deg": float(np.degrees(current_yaw)),
+            "smoothed_target_pos": [float(x) for x in self.smoothed_target_pos],
+            "smoothed_target_vel": [float(x) for x in self.smoothed_target_vel],
         }
         return motor_thrusts, diagnostics
