@@ -289,6 +289,8 @@ class NavigationSimulationCoordinator:
         with self._lock:
             self.stop_mission(status="idle")
             with self.sim_lock:
+                self.sim.chaos.clear_all()
+                self.chaos_mode = None
                 self.sim.reset_simulation()
                 self.sim.data.time = 0.0
                 self.sim.data.qpos[0:3] = [0.0, 0.0, 0.8]
@@ -302,22 +304,81 @@ class NavigationSimulationCoordinator:
             self.tracking_errors.clear()
             return {"status": "reset", "pos": [0.0, 0.0, 0.8]}
 
-    def set_chaos(self, chaos_type: Optional[str], active: bool) -> Dict[str, Any]:
-        """Toggles real-time physical disturbance during flight."""
+    def apply_chaos_preset(self, preset_id: str, toggle: bool = False, additive: bool = False) -> Dict[str, Any]:
+        """Applies or toggles a named chaos preset ('1'..'5' or '0') using ChaosManager."""
         with self._lock:
-            if not active or chaos_type == "none":
-                self.chaos_mode = None
-                self.sim.data.xfrc_applied[self.sim.drone_body_id, :] = 0.0
-                self.sim.chaos.active_chaos["motor_failure"] = False
-                self.sim.chaos.active_chaos["wind_gust"] = False
-            elif chaos_type == "wind":
-                self.chaos_mode = "wind"
-                self.sim.data.xfrc_applied[self.sim.drone_body_id, 0] = 5.0
-            elif chaos_type == "motor":
-                self.chaos_mode = "motor"
-                self.sim.chaos.active_chaos["motor_failure"] = True
+            pid = str(preset_id).strip()
+            if pid in ("0", "clean", "none"):
+                return self.clear_all_chaos()
+            elif toggle:
+                res = self.sim.chaos.toggle_preset(pid)
+                active_keys = self.sim.chaos.get_active_preset_keys()
+                self.chaos_mode = active_keys[0] if active_keys else None
+                msg = f"Preset '{pid}' {res.get('action', 'updated')}"
+            else:
+                msg = self.sim.chaos.apply_preset(pid, additive=additive)
+                self.chaos_mode = pid
 
-            return {"chaos_mode": self.chaos_mode}
+            return {
+                "status": "ok",
+                "message": msg,
+                "preset_id": pid,
+                "chaos_mode": self.chaos_mode,
+                "active_presets": self.sim.chaos.get_active_preset_keys(),
+                "summary": self.sim.chaos.get_chaos_summary(),
+            }
+
+    def trigger_wind_gust(
+        self,
+        force: float = 6.0,
+        direction: Optional[List[float]] = None,
+        duration_s: float = 0.8,
+    ) -> Dict[str, Any]:
+        """Triggers an instantaneous half-sine crosswind gust."""
+        with self._lock:
+            sim_t = float(self.sim.data.time)
+            self.sim.chaos.trigger_wind_gust(
+                force=force,
+                direction=direction or [1.0, 0.0, 0.0],
+                duration_s=duration_s,
+                sim_time=sim_t,
+            )
+            return {"status": "ok", "message": f"Crosswind gust triggered ({force:.1f}N for {duration_s:.1f}s)"}
+
+    def clear_all_chaos(self) -> Dict[str, Any]:
+        """Clears all active failure modes back to pristine nominal flight."""
+        with self._lock:
+            self.sim.chaos.clear_all()
+            self.chaos_mode = None
+            return {
+                "status": "ok",
+                "message": "All chaos cleared; pristine nominal flight restored",
+                "chaos_mode": None,
+                "active_presets": [],
+                "summary": self.sim.chaos.get_chaos_summary(),
+            }
+
+    def set_chaos(self, chaos_type: Optional[str], active: bool) -> Dict[str, Any]:
+        """Backward-compatible disturbance toggle (maps to presets 1..5, 0)."""
+        with self._lock:
+            if not active or chaos_type in (None, "none", "clean", "0"):
+                return self.clear_all_chaos()
+
+            mapping = {
+                "wind": "2",
+                "motor": "1",
+                "payload": "3",
+                "cargo": "3",
+                "sensor": "4",
+                "noise": "4",
+                "compound": "5",
+                "stress": "5",
+            }
+            preset_key = mapping.get(str(chaos_type).lower(), str(chaos_type))
+            res = self.apply_chaos_preset(preset_key, toggle=False, additive=False)
+            self.chaos_mode = chaos_type
+            res["chaos_mode"] = chaos_type
+            return res
 
     # ==========================================================================
     # BACKGROUND SIMULATION LOOP (500 Hz Physics + Cognitive Loop)
@@ -520,6 +581,8 @@ class NavigationSimulationCoordinator:
             "vlm_model": self.vlm_model,
             "vlm_call_count": getattr(self.navigator, "_vlm_call_count", 0),
             "chaos_mode": self.chaos_mode,
+            "active_presets": self.sim.chaos.get_active_preset_keys(),
+            "chaos": self.sim.chaos.get_chaos_summary(),
             "grand_tour": {
                 "active": getattr(self.navigator, "grand_tour_mode", False),
                 "step": getattr(self.navigator, "grand_tour_step_idx", 0),

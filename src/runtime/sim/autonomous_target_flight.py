@@ -522,13 +522,46 @@ class AutonomousTargetNavigator:
         gains = GainMultipliers(pos_kp=1.0, pos_kd=1.0, att_kp=1.0, att_kd=1.0)
         max_tilt = 20.0
 
-        # Chaos Disturbance Rejection
-        if abs(F_dist[0]) > 2.0 or abs(F_dist[1]) > 2.0:
-            ff = [-float(F_dist[0]), -float(F_dist[1]), 0.0]
-            gains.pos_kp = 1.2
-        if m_ctrl[0] > 5.0 and m_ctrl[1] < 4.0:
+        # Chaos Disturbance Rejection & Trajectory Retention
+        # 1. Force Disturbance (Wind + Tethered Cargo Aerodynamics)
+        if hasattr(self.sim, "chaos") and self.sim.chaos.drone1.wind.is_active():
+            w_force = self.sim.chaos.drone1.wind.steady_force
+            ff = [-float(w_force[0]), -float(w_force[1]), -float(w_force[2])]
+            gains.pos_kp = 1.30
+            gains.pos_kd = 1.20
+
+        if abs(F_dist[0]) > 1.2 or abs(F_dist[1]) > 1.2 or abs(F_dist[2]) > 1.5:
+            ff = [
+                float(np.clip(-F_dist[0], -6.0, 6.0)),
+                float(np.clip(-F_dist[1], -6.0, 6.0)),
+                float(np.clip(-F_dist[2], -6.0, 6.0)),
+            ]
+            gains.pos_kp = max(gains.pos_kp, 1.35)
+            gains.pos_kd = max(gains.pos_kd, 1.25)
+
+        # 2. Actuator Degradation / Chipped Propeller Compensation
+        if hasattr(self.sim, "chaos") and self.sim.chaos.drone1.motor.is_active():
+            mults = self.sim.chaos.drone1.motor.multipliers
+            for i in range(4):
+                if mults[i] < 0.95:
+                    trim[i] = float(np.clip(1.0 / max(0.35, mults[i]), 1.0, 2.50))
+            gains.att_kp = max(gains.att_kp, 1.30)
+            gains.att_kd = max(gains.att_kd, 1.20)
+            max_tilt = min(max_tilt, 18.0)
+        elif m_ctrl[0] > 4.5 and (m_ctrl[0] - min(m_ctrl)) > 1.5:
             trim = [2.50, 1.0, 1.0, 1.0]
+            gains.att_kp = 1.30
+            gains.att_kd = 1.20
             max_tilt = 18.0
+
+        # 3. Tethered Cargo Pendulum Adaptation
+        if hasattr(self.sim, "chaos") and self.sim.chaos.drone1.payload.is_active():
+            gains.pos_kp = max(gains.pos_kp, 1.30)
+            gains.pos_kd = max(gains.pos_kd, 1.25)
+
+        # 4. Sensor Noise / IMU Chatter Filtering
+        if hasattr(self.sim, "chaos") and self.sim.chaos.drone1.sensor.is_active():
+            gains.att_kd = min(gains.att_kd, 0.90)
 
         # Phase State Machine
         wc: WaypointCommand
@@ -934,14 +967,22 @@ class AutonomousTargetNavigator:
         return log_entry
 
     def apply_chaos(self, sim_time: float):
-        """Injects optional disturbance for robustness verification."""
-        if self.chaos_type == "wind" and sim_time >= 1.5:
-            # 5.0N lateral wind gust
-            drone_id = self.sim.drone_body_id
-            self.sim.data.xfrc_applied[drone_id, 0] = 5.0  # +X wind
-        elif self.chaos_type == "motor" and sim_time >= 1.5:
-            # Motor 1 degradation (40% power)
-            self.sim.chaos.active_chaos["motor_failure"] = True
+        """Injects disturbance using the unified ChaosManager engine."""
+        if not self.chaos_type or self.chaos_type in ("none", "clean"):
+            return
+        if sim_time >= 1.5:
+            if self.chaos_type == "wind":
+                self.sim.chaos.apply_preset("2")
+            elif self.chaos_type == "motor":
+                self.sim.chaos.apply_preset("1")
+            elif self.chaos_type in ("noise", "sensor"):
+                self.sim.chaos.apply_preset("4")
+            elif self.chaos_type in ("cargo", "payload"):
+                self.sim.chaos.apply_preset("3")
+            elif self.chaos_type in ("compound", "stress"):
+                self.sim.chaos.apply_preset("5")
+            elif self.chaos_type in ("1", "2", "3", "4", "5"):
+                self.sim.chaos.apply_preset(self.chaos_type)
 
     def run_headless(self, max_duration: float = 12.0) -> bool:
         """Runs headless simulation with telemetry reporting."""

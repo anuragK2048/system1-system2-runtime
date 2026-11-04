@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from pydantic import BaseModel, Field
 
 from runtime.server.navigation_state import nav_coordinator
+from runtime.chaos.presets import CHAOS_PRESETS
 
 
 # Paths
@@ -48,8 +49,20 @@ class MissionLaunchRequest(BaseModel):
 
 
 class ChaosRequest(BaseModel):
-    chaos_type: Optional[str] = Field("wind", description="wind | motor | none")
+    chaos_type: Optional[str] = Field("wind", description="wind | motor | 1..5 | none")
     active: bool = Field(True, description="Enable or disable disturbance")
+
+
+class ChaosPresetRequest(BaseModel):
+    preset_id: str = Field(..., description="Preset ID ('1'..'5' or '0' for clean nominal)")
+    toggle: bool = Field(False, description="If True, toggles preset on/off additively")
+    additive: bool = Field(True, description="Whether to additively combine with active chaos")
+
+
+class ChaosGustRequest(BaseModel):
+    force: float = Field(6.0, ge=0.0, description="Peak gust force in Newtons")
+    direction: List[float] = Field(default=[1.0, 0.0, 0.0], description="Gust 3D unit direction vector")
+    duration_s: float = Field(0.8, gt=0.0, description="Gust duration in seconds")
 
 
 # ==============================================================================
@@ -288,8 +301,59 @@ def create_navigation_app() -> FastAPI:
 
     @app.post("/api/navigation/chaos")
     def chaos_endpoint(req: ChaosRequest):
-        """Toggles physical disturbance during flight."""
+        """Backward-compatible disturbance toggle during flight."""
         return nav_coordinator.set_chaos(req.chaos_type, req.active)
+
+    @app.post("/api/navigation/chaos/preset")
+    @app.post("/api/chaos/preset")
+    def chaos_preset_endpoint(req: ChaosPresetRequest):
+        """Applies or toggles a named chaos preset ('1'..'5' or '0' for clean nominal)."""
+        return nav_coordinator.apply_chaos_preset(req.preset_id, toggle=req.toggle, additive=req.additive)
+
+    @app.post("/api/navigation/chaos/toggle")
+    @app.post("/api/chaos/preset/toggle")
+    def chaos_toggle_endpoint(req: ChaosPresetRequest):
+        """Explicit endpoint to toggle a named failure preset on or off additively."""
+        return nav_coordinator.apply_chaos_preset(req.preset_id, toggle=True, additive=True)
+
+    @app.post("/api/navigation/chaos/gust")
+    @app.post("/api/chaos/gust")
+    def chaos_gust_endpoint(req: ChaosGustRequest):
+        """Triggers an instantaneous half-sine crosswind gust."""
+        return nav_coordinator.trigger_wind_gust(force=req.force, direction=req.direction, duration_s=req.duration_s)
+
+    @app.post("/api/navigation/chaos/clear")
+    @app.post("/api/chaos/clear")
+    def chaos_clear_endpoint():
+        """Clears all active disturbances back to pristine nominal flight."""
+        return nav_coordinator.clear_all_chaos()
+
+    @app.get("/api/navigation/chaos/state")
+    @app.get("/api/chaos/state")
+    def chaos_state_endpoint():
+        """Returns the full serialization of current chaos state."""
+        return {
+            "summary": nav_coordinator.sim.chaos.get_chaos_summary(),
+            "active_presets": nav_coordinator.sim.chaos.get_active_preset_keys(),
+            "chaos_mode": nav_coordinator.chaos_mode,
+        }
+
+    @app.get("/api/chaos/presets")
+    def chaos_presets_catalog_endpoint():
+        """Returns the catalog of all available failure presets with metadata."""
+        catalog = []
+        for k, p in CHAOS_PRESETS.items():
+            catalog.append({
+                "key": k,
+                "id": p["id"],
+                "name": p["name"],
+                "description": p["description"],
+                "motor_active": p["motor"].is_active(),
+                "wind_active": p["wind"].is_active(),
+                "payload_active": p["payload"].is_active(),
+                "sensor_active": p["sensor"].is_active(),
+            })
+        return catalog
 
     @app.get("/api/navigation/telemetry")
     def telemetry_endpoint():
@@ -434,6 +498,7 @@ def main():
         print(f"🖥️ Parallel 3D:    Native MuJoCo OpenGL 60 FPS Viewport Active")
         print(f"   • Auto-tracking quadrotor chase camera")
         print(f"   • Press '[' or ']' in 3D window to switch camera perspectives")
+        print(f"   • Press '1'-'5' for Chaos Presets | '0' to Clear All")
     print("═" * 78 + "\n")
 
     config = uvicorn.Config(
@@ -457,6 +522,7 @@ def main():
                 with mujoco.viewer.launch_passive(
                     nav_coordinator.sim.model,
                     nav_coordinator.sim.data,
+                    key_callback=nav_coordinator.sim.chaos.handle_key,
                 ) as viewer:
                     viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
                     viewer.cam.trackbodyid = nav_coordinator.sim.drone_body_id

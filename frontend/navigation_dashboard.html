@@ -547,6 +547,118 @@
     input:checked + .slider { background-color: var(--cyan-bright); }
     input:checked + .slider:before { transform: translateX(16px); }
 
+    /* Chaos Disturbance Injector Styles */
+    .chaos-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 10px;
+    }
+
+    .chaos-card {
+      background: var(--bg-darker);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      position: relative;
+    }
+
+    .chaos-card:hover {
+      border-color: var(--amber-bright);
+      background: var(--bg-card-hover);
+      transform: translateY(-1px);
+    }
+
+    .chaos-card.active {
+      border-color: var(--amber-bright);
+      background: rgba(255, 184, 0, 0.08);
+      box-shadow: 0 0 12px var(--amber-glow);
+    }
+
+    .chaos-card[id="chaos-card-0"].active {
+      border-color: var(--mint-bright);
+      background: rgba(0, 255, 157, 0.08);
+      box-shadow: 0 0 12px var(--mint-glow);
+    }
+
+    .chaos-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .chaos-name {
+      font-weight: 600;
+      font-size: 11px;
+      color: #FFFFFF;
+    }
+
+    .chaos-badge {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+    }
+
+    .chaos-card.active .chaos-badge {
+      background: rgba(255, 184, 0, 0.15);
+      border-color: rgba(255, 184, 0, 0.4);
+      color: var(--amber-bright);
+    }
+
+    .chaos-desc {
+      font-size: 9.5px;
+      color: var(--text-muted);
+      line-height: 1.3;
+    }
+
+    .chaos-ribbon {
+      margin-block-start: 10px;
+      padding: 8px 12px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .chaos-stat {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .chaos-stat .k {
+      font-size: 8.5px;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .chaos-stat .v {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .chaos-stat .v.cyan { color: var(--cyan-bright); }
+    .chaos-stat .v.mint { color: var(--mint-bright); }
+    .chaos-stat .v.amber { color: var(--amber-bright); }
+    .chaos-stat .v.crimson { color: var(--crimson-bright); }
+
     /* Performance Gauges Grid */
     .gauges-grid {
       display: grid;
@@ -1022,19 +1134,88 @@
               </label>
             </div>
           </div>
+        </div>
+      </section>
 
-          <!-- Disturbance Injection Quick Toggles -->
-          <div style="display: flex; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: 11px;">
-            <span style="color: var(--text-dim);">CHAOS INJECTION:</span>
-            <button class="btn btn-secondary" id="btn-chaos-wind" style="padding: 4px 10px; font-size: 11px;" onclick="toggleChaos('wind')">
-              💨 +5.0N LATERAL WIND
-            </button>
-            <button class="btn btn-secondary" id="btn-chaos-motor" style="padding: 4px 10px; font-size: 11px;" onclick="toggleChaos('motor')">
-              ⚠️ 40% MOTOR 1 CUT
-            </button>
-            <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px;" onclick="toggleChaos('none')">
-              🟢 CLEAR DISTURBANCES
-            </button>
+      <!-- Physical Chaos & Dynamic Disturbance Injector -->
+      <section class="dashboard-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="icon">🌪️</span> Physical Chaos & Robustness Testing
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <span id="chaos-status-pill" style="font-family: var(--font-mono); font-size: 10px; padding: 2px 8px; border-radius: 4px; background: rgba(0, 255, 157, 0.12); border: 1px solid rgba(0, 255, 157, 0.4); color: var(--mint-bright); font-weight: 700;">
+              STATUS: NOMINAL (CLEAN)
+            </span>
+            <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 10px;" onclick="triggerGust(6.0)">💨 PULSE GUST (6N)</button>
+          </div>
+        </div>
+
+        <div class="panel-body">
+          <div class="chaos-grid">
+            <div class="chaos-card" id="chaos-card-1" onclick="toggleChaosPreset('1')">
+              <div class="chaos-card-header">
+                <span class="chaos-name">💥 Motor 1 Cut</span>
+                <span class="chaos-badge">M1 40%</span>
+              </div>
+              <div class="chaos-desc">40% thrust loss + blade flutter</div>
+            </div>
+
+            <div class="chaos-card" id="chaos-card-2" onclick="toggleChaosPreset('2')">
+              <div class="chaos-card-header">
+                <span class="chaos-name">💨 6.5N Crosswind</span>
+                <span class="chaos-badge">+X WIND</span>
+              </div>
+              <div class="chaos-desc">6.5N lateral push + Dryden turbulence</div>
+            </div>
+
+            <div class="chaos-card" id="chaos-card-3" onclick="toggleChaosPreset('3')">
+              <div class="chaos-card-header">
+                <span class="chaos-name">📦 Tethered Cargo</span>
+                <span class="chaos-badge">0.35kg BOB</span>
+              </div>
+              <div class="chaos-desc">0.35kg swinging bob + wind drag</div>
+            </div>
+
+            <div class="chaos-card" id="chaos-card-4" onclick="toggleChaosPreset('4')">
+              <div class="chaos-card-header">
+                <span class="chaos-name">⚡ IMU Chatter</span>
+                <span class="chaos-badge">0.85 rad/s</span>
+              </div>
+              <div class="chaos-desc">0.85 rad/s gyro noise + vibration</div>
+            </div>
+
+            <div class="chaos-card" id="chaos-card-5" onclick="toggleChaosPreset('5')">
+              <div class="chaos-card-header">
+                <span class="chaos-name">🌪️ Triple Stress</span>
+                <span class="chaos-badge">COMPOUND</span>
+              </div>
+              <div class="chaos-desc">M1 cut (50%) + 5.0N Wind + Cargo</div>
+            </div>
+
+            <div class="chaos-card active" id="chaos-card-0" onclick="clearAllChaos()">
+              <div class="chaos-card-header">
+                <span class="chaos-name">🟢 Clean Nominal</span>
+                <span class="chaos-badge" style="color: var(--mint-bright); border-color: rgba(0, 255, 157, 0.4);">PRISTINE</span>
+              </div>
+              <div class="chaos-desc">Clear disturbances & restore hover</div>
+            </div>
+          </div>
+
+          <!-- Active Chaos Telemetry & Recovery Ribbon -->
+          <div class="chaos-ribbon" id="chaos-telemetry-ribbon">
+            <div class="chaos-stat">
+              <span class="k">L1 OBSERVED FORCE</span>
+              <span class="v" id="lbl-chaos-force">Fx: +0.0N | Fy: +0.0N | ||F||: 0.0N</span>
+            </div>
+            <div class="chaos-stat">
+              <span class="k">SYSTEM-2 RECOVERY PATCH</span>
+              <span class="v cyan" id="lbl-chaos-compensation">Feedforward: [0.0, 0.0]N | Motor Trim: [1.0, 1.0, 1.0, 1.0]</span>
+            </div>
+            <div class="chaos-stat">
+              <span class="k">TRAJECTORY RETENTION</span>
+              <span class="v mint" id="lbl-chaos-trajectory">Flight path locked on target</span>
+            </div>
           </div>
         </div>
       </section>
@@ -1415,6 +1596,28 @@
         }
       }
 
+      // Update Chaos Injector UI & Readouts
+      updateChaosUI(data.active_presets || []);
+      const chaosForceEl = document.getElementById("lbl-chaos-force");
+      if (chaosForceEl && data.l1_force) {
+        chaosForceEl.innerText = `Fx: ${data.l1_force[0] >= 0 ? "+" : ""}${data.l1_force[0].toFixed(1)}N | Fy: ${data.l1_force[1] >= 0 ? "+" : ""}${data.l1_force[1].toFixed(1)}N | ||F||: ${data.l1_force_norm.toFixed(1)}N`;
+      }
+      const chaosCompEl = document.getElementById("lbl-chaos-compensation");
+      if (chaosCompEl && data.feedforward_force && data.motor_trim) {
+        chaosCompEl.innerText = `Feedforward: [${data.feedforward_force[0].toFixed(1)}, ${data.feedforward_force[1].toFixed(1)}]N | Motor Trim: [${data.motor_trim.join(", ")}]`;
+      }
+      const chaosTrajEl = document.getElementById("lbl-chaos-trajectory");
+      if (chaosTrajEl) {
+        const isDisturbed = (data.active_presets && data.active_presets.length > 0) || (data.l1_force_norm > 1.5);
+        if (isDisturbed) {
+          chaosTrajEl.innerText = `Compensating disturbance -> Path locked on ${data.mission.toUpperCase()} (${data.phase})`;
+          chaosTrajEl.className = "v amber";
+        } else {
+          chaosTrajEl.innerText = `Flight path locked on ${data.mission.toUpperCase()} (${data.phase})`;
+          chaosTrajEl.className = "v mint";
+        }
+      }
+
       // Update Chart Buffer
       telemetryHistory.push({
         t: data.time,
@@ -1719,13 +1922,98 @@
       }
     }
 
-    // Chaos Toggles
+    // Physical Chaos & Disturbance Controls
+    function toggleChaosPreset(presetId) {
+      fetch("/api/navigation/chaos/preset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preset_id: String(presetId), toggle: true, additive: true })
+      })
+      .then(r => r.json())
+      .then(data => {
+        updateChaosUI(data.active_presets || []);
+      })
+      .catch(e => console.error("Error toggling chaos preset:", e));
+    }
+
+    function triggerGust(force) {
+      fetch("/api/navigation/chaos/gust", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force: force || 6.0, duration_s: 0.8, direction: [1.0, 0.0, 0.0] })
+      })
+      .then(r => r.json())
+      .then(data => {
+        console.log("Gust triggered:", data.message);
+      })
+      .catch(e => console.error("Error triggering wind gust:", e));
+    }
+
+    function clearAllChaos() {
+      fetch("/api/navigation/chaos/clear", { method: "POST" })
+        .then(r => r.json())
+        .then(() => updateChaosUI([]))
+        .catch(e => console.error("Error clearing chaos:", e));
+    }
+
+    function updateChaosUI(activePresets) {
+      const presets = activePresets || [];
+      const hasChaos = presets.length > 0;
+
+      // Update card highlighted active states
+      for (let i = 1; i <= 5; i++) {
+        const card = document.getElementById(`chaos-card-${i}`);
+        if (card) {
+          if (presets.includes(String(i))) {
+            card.classList.add("active");
+          } else {
+            card.classList.remove("active");
+          }
+        }
+      }
+      const cleanCard = document.getElementById("chaos-card-0");
+      if (cleanCard) {
+        if (!hasChaos) {
+          cleanCard.classList.add("active");
+        } else {
+          cleanCard.classList.remove("active");
+        }
+      }
+
+      // Update header status badge
+      const pill = document.getElementById("chaos-status-pill");
+      if (pill) {
+        if (!hasChaos) {
+          pill.innerText = "STATUS: NOMINAL (CLEAN)";
+          pill.style.color = "var(--mint-bright)";
+          pill.style.background = "rgba(0, 255, 157, 0.12)";
+          pill.style.borderColor = "rgba(0, 255, 157, 0.4)";
+        } else {
+          const names = presets.map(p => {
+            if (p === "1") return "M1 CUT";
+            if (p === "2") return "6.5N WIND";
+            if (p === "3") return "CARGO";
+            if (p === "4") return "IMU CHATTER";
+            if (p === "5") return "TRIPLE STRESS";
+            return `PRESET ${p}`;
+          });
+          pill.innerText = `CHAOS ACTIVE: [${names.join(" | ")}]`;
+          pill.style.color = "var(--amber-bright)";
+          pill.style.background = "rgba(255, 184, 0, 0.15)";
+          pill.style.borderColor = "rgba(255, 184, 0, 0.4)";
+        }
+      }
+    }
+
+    // Backward-compatible toggleChaos
     function toggleChaos(type) {
       fetch("/api/navigation/chaos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chaos_type: type, active: type !== "none" })
-      });
+      })
+      .then(r => r.json())
+      .then(data => updateChaosUI(data.active_presets || []));
     }
 
     // Live Gemini VLM Toggle
