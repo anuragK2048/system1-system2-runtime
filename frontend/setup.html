@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Setup — System 1 / System 2 Drone Flight Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-darkest: #07090E;
+      --bg-darker: #0D1117;
+      --bg-card: #161B22;
+      --bg-card-hover: #1C2128;
+      --border-color: #30363D;
+      --border-focus: #58A6FF;
+      --text-main: #F0F6FC;
+      --text-muted: #8B949E;
+      --text-dim: #6E7681;
+
+      --d1-orange: #FF7B00;
+      --d1-orange-glow: rgba(255, 123, 0, 0.25);
+      --d2-cyan: #00D8F6;
+      --d2-cyan-glow: rgba(0, 216, 246, 0.25);
+
+      --accent-green: #3FB950;
+      --accent-green-glow: rgba(63, 185, 80, 0.25);
+      --accent-red: #F85149;
+      --accent-red-glow: rgba(248, 81, 73, 0.25);
+      --accent-amber: #D29922;
+      --accent-purple: #BC8CFF;
+      --accent-purple-glow: rgba(188, 140, 255, 0.25);
+
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-darkest);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      line-height: 1.5;
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg-darkest); }
+    ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+    /* Header Bar */
+    header {
+      background: var(--bg-darker);
+      border-bottom: 1px solid var(--border-color);
+      padding: 10px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(12px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand h1 {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      color: #FFFFFF;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge-hybrid {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 2px 7px;
+      border-radius: 12px;
+      background: rgba(188, 140, 255, 0.15);
+      border: 1px solid rgba(188, 140, 255, 0.4);
+      color: var(--accent-purple);
+    }
+
+    /* Setup Layout */
+    .setup-wrap {
+      max-width: 560px;
+      margin: 0 auto;
+      padding: 36px 20px 48px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .setup-intro {
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    }
+
+    .panel-header {
+      background: rgba(22, 27, 34, 0.95);
+      border-bottom: 1px solid var(--border-color);
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .panel-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .panel-body {
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    /* Form Fields */
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .field .hint {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    .field input[type="number"],
+    .field select {
+      background: var(--bg-darker);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      padding: 8px 10px;
+      width: 100%;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .field input[type="number"]:focus,
+    .field select:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+    }
+
+    .field input.field-error,
+    .field select.field-error {
+      border-color: var(--accent-red);
+      box-shadow: 0 0 0 3px var(--accent-red-glow);
+    }
+
+    .wing-info {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .wing-info .estimate-warning {
+      color: var(--accent-amber);
+      font-family: var(--font-sans);
+      font-weight: 600;
+    }
+
+    /* Buttons */
+    .btn-action {
+      background: #21262D;
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+
+    .btn-action:hover {
+      background: #30363D;
+      border-color: #8B949E;
+    }
+
+    .btn-action:disabled {
+      opacity: 0.55;
+      cursor: wait;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn-launch {
+      flex: 1;
+      background: rgba(63, 185, 80, 0.15);
+      border: 1px solid rgba(63, 185, 80, 0.45);
+      color: #7EE787;
+      font-size: 12px;
+      padding: 9px 12px;
+    }
+
+    .btn-launch:hover {
+      background: rgba(63, 185, 80, 0.28);
+      border-color: var(--accent-green);
+    }
+
+    /* Error / Info Banner */
+    .banner {
+      display: none;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .banner.visible {
+      display: block;
+    }
+
+    .banner-error {
+      background: rgba(248, 81, 73, 0.12);
+      border: 1px solid rgba(248, 81, 73, 0.4);
+      color: #FFA198;
+    }
+
+    .banner-info {
+      background: rgba(88, 166, 255, 0.10);
+      border: 1px solid rgba(88, 166, 255, 0.4);
+      color: #79C0FF;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <h1>🚁 System 1 / System 2 <span class="badge-hybrid">Mission Setup</span></h1>
+    </div>
+  </header>
+
+  <main class="setup-wrap">
+    <p class="setup-intro">
+      Configure the mission, then launch. The simulation starts with these
+      parameters and the dashboard opens.
+    </p>
+
+    <div class="banner" id="banner" role="alert"></div>
+
+    <section class="panel">
+      <div class="panel-header">
+        <span class="panel-title">🛰️ Mission Configuration</span>
+      </div>
+      <div class="panel-body">
+
+        <div class="field">
+          <span class="section-title" style="margin: 0;">Drone Type</span>
+          <select id="droneType"></select>
+          <div class="wing-info" id="wingInfo"></div>
+        </div>
+
+        <div class="field">
+          <label for="payloadKg">Payload Mass (kg)</label>
+          <input type="number" id="payloadKg" min="0" max="2" step="0.05" value="0">
+          <span class="hint">Tethered payload carried by both drones (0 = none).</span>
+        </div>
+
+        <div class="field">
+          <label for="windMs">Wind Speed (m/s)</label>
+          <input type="number" id="windMs" min="0" max="20" step="0.5" value="0">
+          <span class="hint">Sustained crosswind applied to both drones.</span>
+        </div>
+
+        <div class="button-row">
+          <button class="btn-action" id="btnReset" type="button">↺ Reset to Defaults</button>
+          <button class="btn-action btn-launch" id="btnLaunch" type="button">🚀 Launch</button>
+        </div>
+
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const payloadInput = document.getElementById('payloadKg');
+    const windInput = document.getElementById('windMs');
+    const droneSelect = document.getElementById('droneType');
+    const wingInfo = document.getElementById('wingInfo');
+    const banner = document.getElementById('banner');
+    const btnLaunch = document.getElementById('btnLaunch');
+    const btnReset = document.getElementById('btnReset');
+
+    const FIELD_BY_NAME = {
+      payload_kg: payloadInput,
+      wind_ms: windInput,
+      drone_type: droneSelect,
+    };
+
+    let presets = [];
+    let defaults = null;
+
+    function showBanner(message, isError) {
+      banner.textContent = message;
+      banner.className = 'banner visible ' + (isError ? 'banner-error' : 'banner-info');
+    }
+
+    function hideBanner() {
+      banner.textContent = '';
+      banner.className = 'banner';
+    }
+
+    function clearFieldErrors() {
+      Object.values(FIELD_BY_NAME).forEach((el) => el.classList.remove('field-error'));
+    }
+
+    function markFieldError(name) {
+      const el = FIELD_BY_NAME[name];
+      if (el) el.classList.add('field-error');
+    }
+
+    function updateWingInfo() {
+      const preset = presets.find((p) => p.id === droneSelect.value);
+      if (!preset) {
+        wingInfo.textContent = '';
+        return;
+      }
+      const length = `Wing length: ${Number(preset.wing_length_m).toFixed(3)} m`;
+      if (preset.geometry_source === 'xml') {
+        wingInfo.innerHTML = '';
+        wingInfo.textContent = `${length} · from scene XML`;
+      } else {
+        wingInfo.innerHTML = '';
+        const text = document.createElement('span');
+        text.textContent = `${length} · `;
+        const warning = document.createElement('span');
+        warning.className = 'estimate-warning';
+        warning.textContent = '⚠️ estimate';
+        wingInfo.append(text, warning);
+      }
+    }
+
+    function applyDefaults() {
+      if (!defaults) return;
+      payloadInput.value = defaults.payload_kg;
+      windInput.value = defaults.wind_ms;
+      droneSelect.value = defaults.drone_type;
+      clearFieldErrors();
+      hideBanner();
+      updateWingInfo();
+    }
+
+    async function loadPresets() {
+      try {
+        const res = await fetch('/api/setup/presets');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        presets = data.drone_types || [];
+        defaults = data.defaults || null;
+
+        droneSelect.innerHTML = '';
+        presets.forEach((preset) => {
+          const option = document.createElement('option');
+          option.value = preset.id;
+          option.textContent = preset.label;
+          droneSelect.appendChild(option);
+        });
+        applyDefaults();
+      } catch (err) {
+        showBanner(`Failed to load mission presets (${err.message}). Is the server running?`, true);
+        btnLaunch.disabled = true;
+      }
+    }
+
+    // Highlights fields named in a FastAPI 422 response and shows the messages.
+    function handleValidationError(data) {
+      const messages = [];
+      if (Array.isArray(data.detail)) {
+        data.detail.forEach((item) => {
+          const loc = Array.isArray(item.loc) ? item.loc : [];
+          const fieldName = loc[loc.length - 1];
+          markFieldError(fieldName);
+          if (item.msg) messages.push(item.msg);
+        });
+      } else if (typeof data.detail === 'string') {
+        if (data.detail.includes('drone_type')) markFieldError('drone_type');
+        messages.push(data.detail);
+      }
+      showBanner(messages.length ? `Invalid mission: ${messages.join('; ')}` : 'Invalid mission parameters.', true);
+    }
+
+    async function launch() {
+      clearFieldErrors();
+      hideBanner();
+      btnLaunch.disabled = true;
+      btnLaunch.textContent = '🚀 Launching…';
+      try {
+        const res = await fetch('/api/setup/launch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            payload_kg: parseFloat(payloadInput.value),
+            wind_ms: parseFloat(windInput.value),
+            drone_type: droneSelect.value,
+          }),
+        });
+
+        if (res.ok) {
+          window.location.href = '/';
+          return;
+        }
+
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 409) {
+          showBanner(data.detail || 'This change requires restarting the viewer.', true);
+        } else if (res.status === 422) {
+          handleValidationError(data);
+        } else {
+          showBanner(data.detail || `Launch failed (HTTP ${res.status}).`, true);
+        }
+      } catch (err) {
+        showBanner(`Launch failed (${err.message}). Is the server running?`, true);
+      } finally {
+        btnLaunch.disabled = false;
+        btnLaunch.textContent = '🚀 Launch';
+      }
+    }
+
+    droneSelect.addEventListener('change', updateWingInfo);
+    btnReset.addEventListener('click', applyDefaults);
+    btnLaunch.addEventListener('click', launch);
+    [payloadInput, windInput, droneSelect].forEach((el) => {
+      el.addEventListener('input', () => el.classList.remove('field-error'));
+    });
+
+    loadPresets();
+  </script>
+</body>
+</html>

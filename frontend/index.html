@@ -153,6 +153,46 @@
       transform: translateY(-1px);
     }
 
+    .btn-reset-sim {
+      background: rgba(88, 166, 255, 0.12);
+      border: 1px solid rgba(88, 166, 255, 0.35);
+      color: #79C0FF;
+      font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+    }
+
+    .btn-reset-sim:hover:not(:disabled) {
+      background: rgba(88, 166, 255, 0.25);
+      border-color: var(--border-focus);
+      color: #FFFFFF;
+      transform: translateY(-1px);
+    }
+
+    .btn-reset-sim:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+
+    .sim-reset-confirm {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--accent-green);
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+
+    .sim-reset-confirm.show {
+      opacity: 1;
+    }
+
     /* Main Grid Layout */
     .dashboard-container {
       display: grid;
@@ -508,6 +548,33 @@
     .fpv-tab.active[data-fpv="drone2"] {
       color: var(--d2-cyan);
       border-bottom: 2px solid var(--d2-cyan);
+    }
+
+    /* View-mode segmented toggle (FPV vs 3rd Person) — same shell as .fpv-tabs */
+    .view-mode-tab {
+      flex: 1;
+      text-align: center;
+      padding: 5px 4px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: transparent;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .view-mode-tab:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .view-mode-tab.active {
+      color: #FFFFFF;
+      background: #21262D;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+      border-bottom: 2px solid var(--border-focus);
     }
 
     .fpv-img {
@@ -1069,6 +1136,10 @@
         <span class="conn-dot" id="connDot"></span>
         <span id="connLabel">Connecting...</span>
       </div>
+      <span class="sim-reset-confirm" id="simResetConfirm">✓ Sim reset</span>
+      <button class="btn-reset-sim" id="btnResetSim" title="Restore payload 0, wind 0, stock preset and relaunch a fresh sim">
+        ↺ Reset sim
+      </button>
       <button class="btn-reset-drones" id="btnResetAll" title="Restore level hover and clear all failure modes">
         🔄 Reset Drones
       </button>
@@ -1360,7 +1431,11 @@
             <span class="section-title" style="margin: 0;">📷 FPV Camera</span>
             <span style="font-size: 10px; color: var(--text-dim);">640×480 · ~15 FPS</span>
           </div>
-          <div class="fpv-tabs">
+          <div class="fpv-tabs" role="group" aria-label="Camera view mode">
+            <button class="view-mode-tab active" data-viewmode="fpv" id="viewModeFpv">🎥 FPV</button>
+            <button class="view-mode-tab" data-viewmode="third" id="viewModeThird">👀 3rd Person</button>
+          </div>
+          <div class="fpv-tabs" id="fpvDroneTabs">
             <button class="fpv-tab active" data-fpv="drone2" id="fpvTabD2">🔵 Left (Cyan / D2)</button>
             <button class="fpv-tab" data-fpv="drone1" id="fpvTabD1">🟠 Right (Orange / D1)</button>
           </div>
@@ -1959,13 +2034,37 @@
     }
 
     // Target Tabs
-    // FPV Camera drone switch (swaps the MJPEG <img> source; no WebSocket)
+    // Camera view switch (swaps the MJPEG <img> source; no WebSocket).
+    // Reassigning src (with a cache-buster) kills the previous MJPEG stream.
+    let fpvViewMode = "fpv";
+    let fpvDrone = "drone2";
+    function updateFpvStream() {
+      const fpvImg = document.getElementById("fpvImg");
+      const src = fpvViewMode === "third"
+        ? `/api/fpv/stream?view=third&t=${Date.now()}`
+        : `/api/fpv/stream?view=fpv&drone=${fpvDrone}&t=${Date.now()}`;
+      fpvImg.src = src;
+    }
+
+    // FPV / 3rd-person segmented toggle
+    document.querySelectorAll(".view-mode-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        if (tab.dataset.viewmode === fpvViewMode) return;
+        document.querySelectorAll(".view-mode-tab").forEach(t => t.classList.remove("active"));
+        tab.classList.add("active");
+        fpvViewMode = tab.dataset.viewmode;
+        document.getElementById("fpvDroneTabs").style.display = fpvViewMode === "third" ? "none" : "";
+        updateFpvStream();
+      });
+    });
+
+    // FPV drone switch (drone1/drone2 tabs, FPV mode only)
     document.querySelectorAll(".fpv-tab").forEach(tab => {
       tab.addEventListener("click", () => {
         document.querySelectorAll(".fpv-tab").forEach(t => t.classList.remove("active"));
         tab.classList.add("active");
-        const fpvImg = document.getElementById("fpvImg");
-        fpvImg.src = `/api/fpv/stream?drone=${tab.dataset.fpv}&t=${Date.now()}`;
+        fpvDrone = tab.dataset.fpv;
+        updateFpvStream();
       });
     });
 
@@ -2077,6 +2176,33 @@
         sliderGyroNoise.value = 0;
         valGyroNoise.textContent = "0.00 rad/s";
       });
+    });
+
+    // Reset Sim Button (full restore: payload 0, wind 0, stock preset, fresh sim)
+    const btnResetSim = document.getElementById("btnResetSim");
+    btnResetSim.addEventListener("click", async () => {
+      const confirmEl = document.getElementById("simResetConfirm");
+      btnResetSim.disabled = true;
+      const originalText = btnResetSim.textContent;
+      btnResetSim.textContent = "↺ Resetting…";
+      try {
+        const res = await fetch('/api/setup/reset', { method: 'POST' });
+        if (!res.ok) {
+          let detail = `Reset failed (${res.status})`;
+          try { detail = (await res.json()).detail || detail; } catch (e) {}
+          throw new Error(detail);
+        }
+        confirmEl.textContent = "✓ Sim reset";
+        confirmEl.classList.add("show");
+        setTimeout(() => window.location.reload(), 1000);
+      } catch (err) {
+        console.error("Sim reset failed", err);
+        confirmEl.textContent = `✗ ${err.message}`;
+        confirmEl.classList.add("show");
+        btnResetSim.disabled = false;
+        btnResetSim.textContent = originalText;
+        setTimeout(() => confirmEl.classList.remove("show"), 3000);
+      }
     });
 
     // Start WebSocket
