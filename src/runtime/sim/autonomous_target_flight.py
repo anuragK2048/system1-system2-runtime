@@ -204,39 +204,34 @@ class AutonomousTargetNavigator:
         self.mission_complete = False
         self.station_hold_start_time = -1.0
 
-        # Assess current drone position to pick optimal collision-free approach leg
+        # Assess current drone position to pick direct point-to-point approach leg
         curr_x = float(self.sim.data.qpos[0])
         curr_y = float(self.sim.data.qpos[1])
         curr_z = float(self.sim.data.qpos[2])
 
         if curr_z < 0.4:
             self.phase = "PHASE_0_LIFTOFF"
+        elif curr_y >= 4.2:
+            # Outside Left Window partition wall: traverse back into main arena room
+            self.phase = "PHASE_WINDOW_RETURN_HUB"
+        elif curr_y <= -4.2:
+            # Outside Right Arch partition wall: traverse back into main arena room
+            self.phase = "PHASE_ARCH_RETURN_HUB"
         elif target_clean in ("window", "traverse_window"):
-            if curr_x > 1.0:
-                self.phase = "PHASE_RUNWAY_RETURN_HUB"
-            elif curr_y > 4.5:
-                self.phase = "PHASE_5_EGRESS_STABILIZE"
-                self.mission_complete = True
+            if abs(curr_x) < 0.8 and curr_y >= 3.5:
+                self.phase = "PHASE_3_APERTURE_INGRESS"
             else:
                 self.phase = "PHASE_1_SECTOR_SCAN"
         elif target_clean in ("arch", "traverse_arch"):
-            if curr_x > 1.0:
-                self.phase = "PHASE_RUNWAY_RETURN_HUB"
-            elif curr_y < -4.5:
-                self.phase = "PHASE_5_EGRESS_STABILIZE"
-                self.mission_complete = True
+            if abs(curr_x) < 0.8 and curr_y <= -3.5:
+                self.phase = "PHASE_3_APERTURE_INGRESS"
             else:
                 self.phase = "PHASE_1_SECTOR_SCAN"
         else:
-            # Targets along the runway spine (alpha, delta, poles, home)
-            if curr_y > 1.5:
-                self.phase = "PHASE_WINDOW_RETURN_HUB"
-            elif curr_y < -1.5:
-                self.phase = "PHASE_ARCH_RETURN_HUB"
-            else:
-                self.phase = "PHASE_2_CORRIDOR_APPROACH"
+            # Direct approach to runway targets (alpha, delta, poles, home)
+            self.phase = "PHASE_2_CORRIDOR_APPROACH"
 
-        print(f"🔀 [SEAMLESS RETARGET] Target: '{self.target_mission.upper()}' | Leg: {self.phase} from [{curr_x:.2f}, {curr_y:.2f}, {curr_z:.2f}]")
+        print(f"🔀 [DIRECT RETARGET] Target: '{self.target_mission.upper()}' | Leg: {self.phase} from [{curr_x:.2f}, {curr_y:.2f}, {curr_z:.2f}]")
 
     def get_onboard_telemetry(self) -> Dict[str, Any]:
         """Reads strictly onboard sensory estimates (no privileged world targets)."""
@@ -476,6 +471,7 @@ class AutonomousTargetNavigator:
         dx = dest_x - cur_x
         dy = dest_y - cur_y
         dist_xy = math.hypot(dx, dy)
+        dist_3d = math.sqrt(dx * dx + dy * dy + (dest_z - cur_z) ** 2)
 
         if dist_xy > 0.35:
             desired_yaw_deg = math.degrees(math.atan2(dy, dx))
@@ -488,8 +484,8 @@ class AutonomousTargetNavigator:
 
         if dist_xy > 0.35 and abs_yaw_err > fov_lock_deg:
             diag = (
-                f"Visual Lock: Rotating in-place to {desired_yaw_deg:.0f}° "
-                f"to acquire {target_name} in FPV POV (Δψ={abs_yaw_err:.0f}°)"
+                f"[SYSTEM 2 VLN] Active Visual Saccade: Rotating in-place to {desired_yaw_deg:.0f}° "
+                f"to acquire {target_name} (Bearing: {desired_yaw_deg:.0f}°, Range: {dist_3d:.1f}m, Δψ: {abs_yaw_err:.0f}°)"
             )
             cmd = WaypointCommand(
                 mode="world",
@@ -501,7 +497,8 @@ class AutonomousTargetNavigator:
             return cmd, diag, False
 
         diag = (
-            f"FPV Locked ({desired_yaw_deg:.0f}°): Advancing forward to {target_name}"
+            f"[SYSTEM 2 VLN] Target Locked ({desired_yaw_deg:.0f}°): Advancing forward along "
+            f"direct visual intercept to {target_name} (Range: {dist_3d:.1f}m)"
         )
         cmd = WaypointCommand(
             mode="world",
@@ -514,10 +511,10 @@ class AutonomousTargetNavigator:
 
     def _visual_inertial_reasoner(self, telemetry: dict, sim_time: float) -> System2Patch:
         """Deterministic System 2 reasoner driven strictly by onboard telemetry and visual phase state."""
-        alt = telemetry["altitude_m"]
-        yaw = telemetry["attitude_deg"]["yaw"]
-        F_dist = telemetry["unmodeled_force_disturbance_N"]
-        m_ctrl = telemetry["motor_controls_N"]
+        alt = telemetry.get("altitude_m", telemetry.get("altitude", float(self.sim.data.qpos[2])))
+        yaw = telemetry.get("attitude_deg", {}).get("yaw", telemetry.get("attitude", {}).get("yaw", 0.0))
+        F_dist = telemetry.get("unmodeled_force_disturbance_N", telemetry.get("l1_force", [0.0, 0.0, 0.0]))
+        m_ctrl = telemetry.get("motor_controls_N", telemetry.get("motor_thrusts", [3.25, 3.25, 3.25, 3.25]))
 
         # Default Nominal Values
         ff = [0.0, 0.0, 0.0]
@@ -543,67 +540,75 @@ class AutonomousTargetNavigator:
         pos_y = float(pos[1])
 
         # ----------------------------------------------------------------------
-        # UNIVERSAL INTER-SECTOR RETURN PHASES (Collision-Free Arena Hub Transit)
+        # UNIVERSAL INTER-SECTOR RETURN PHASES (Direct Clear-and-Intercept Transit)
         # ----------------------------------------------------------------------
         if self.phase == "PHASE_RUNWAY_RETURN_HUB":
-            if pos_x <= 0.6:
-                if self.target_mission in ("window", "traverse_window"):
-                    self.phase = "PHASE_1_SECTOR_SCAN"
-                    diagnosis = "Arena Hub reached -> In-Place Yaw Saccade (+90° Left) toward Left Window"
-                    wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.10], yaw_deg=90.0)
-                elif self.target_mission in ("arch", "traverse_arch"):
-                    self.phase = "PHASE_1_SECTOR_SCAN"
-                    diagnosis = "Arena Hub reached -> In-Place Yaw Saccade (-90° Right) toward Right Arch"
-                    wc = WaypointCommand(mode="world", target=[0.0, 0.0, 0.90], yaw_deg=-90.0)
-                else:
-                    self.phase = "PHASE_4_PRECISION_HOVER"
-                    diagnosis = "Arena Hub reached -> Holding station at Origin [0, 0, 1.0]"
-                    wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
-                    self.mission_complete = True
+            # Direct transition to active target without stopping at origin
+            if self.target_mission in ("window", "traverse_window"):
+                self.phase = "PHASE_1_SECTOR_SCAN"
+            elif self.target_mission in ("arch", "traverse_arch"):
+                self.phase = "PHASE_1_SECTOR_SCAN"
             else:
-                wc, diagnosis, _ = self._camera_forward_waypoint(
-                    pos, yaw, [0.0, 0.0, 1.10], nominal_yaw_deg=180.0, max_velocity=1.2, corridor_width=0.6, target_name="Arena Hub"
-                )
+                self.phase = "PHASE_2_CORRIDOR_APPROACH"
 
         elif self.phase == "PHASE_WINDOW_RETURN_HUB":
-            if pos_y >= 4.2:
-                # Egress side: rotate in-place to face back inside (-90°), then traverse window opening
+            if pos_y >= 3.6:
+                # Egress side: rotate in-place to face back inside (-90°), then traverse window opening back into room
                 wc, diagnosis, is_locked = self._camera_forward_waypoint(
                     pos, yaw, [0.0, 3.2, 1.10], nominal_yaw_deg=-90.0, max_velocity=0.6, corridor_width=0.4, target_name="Window Aperture Ingress"
                 )
                 if is_locked:
                     max_tilt = 12.0
-            elif pos_y > 0.6:
-                wc, diagnosis, _ = self._camera_forward_waypoint(
-                    pos, yaw, [0.0, 0.0, 1.0], nominal_yaw_deg=-90.0, max_velocity=1.0, corridor_width=0.5, target_name="Arena Hub"
-                )
             else:
-                self.phase = "PHASE_2_CORRIDOR_APPROACH"
-                diagnosis = f"Arena Hub reached -> Advancing toward target '{self.target_mission.upper()}'"
-                wc, _, _ = self._camera_forward_waypoint(
-                    pos, yaw, [0.0, 0.0, 1.0], nominal_yaw_deg=0.0, max_velocity=0.6, target_name=self.target_mission.upper()
-                )
+                # Once safely inside main room, immediately switch to direct transit to target!
+                if self.target_mission in ("window", "traverse_window"):
+                    self.phase = "PHASE_5_EGRESS_STABILIZE"
+                    self.mission_complete = True
+                    diagnosis = "[SYSTEM 2 VLN] Window clearance complete; station-keeping hover"
+                    wc = WaypointCommand(mode="world", target=[0.0, 3.5, 1.10], yaw_deg=90.0)
+                elif self.target_mission in ("arch", "traverse_arch"):
+                    self.phase = "PHASE_1_SECTOR_SCAN"
+                    diagnosis = "[SYSTEM 2 VLN] Main room entered -> Direct sector scan for Right Arch"
+                    wc, _, _ = self._camera_forward_waypoint(
+                        pos, yaw, [0.0, -3.8, 0.90], nominal_yaw_deg=-90.0, max_velocity=0.6, target_name="Right Arch"
+                    )
+                else:
+                    self.phase = "PHASE_2_CORRIDOR_APPROACH"
+                    diagnosis = f"[SYSTEM 2 VLN] Main room entered -> Direct visual intercept to '{self.target_mission.upper()}'"
+                    wc, _, _ = self._camera_forward_waypoint(
+                        pos, yaw, [pos_x, pos_y, 1.0], nominal_yaw_deg=0.0, max_velocity=0.6, target_name=self.target_mission.upper()
+                    )
 
         elif self.phase == "PHASE_ARCH_RETURN_HUB":
-            if pos_y <= -4.2:
+            if pos_y <= -3.6:
+                # Egress side: rotate in-place to face back inside (+90°), then traverse arch opening back into room
                 wc, diagnosis, is_locked = self._camera_forward_waypoint(
                     pos, yaw, [0.0, -3.2, 0.90], nominal_yaw_deg=90.0, max_velocity=0.6, corridor_width=0.4, target_name="Arch Aperture Ingress"
                 )
                 if is_locked:
                     max_tilt = 12.0
-            elif pos_y < -0.6:
-                wc, diagnosis, _ = self._camera_forward_waypoint(
-                    pos, yaw, [0.0, 0.0, 1.0], nominal_yaw_deg=90.0, max_velocity=1.0, corridor_width=0.5, target_name="Arena Hub"
-                )
             else:
-                self.phase = "PHASE_2_CORRIDOR_APPROACH"
-                diagnosis = f"Arena Hub reached -> Advancing toward target '{self.target_mission.upper()}'"
-                wc, _, _ = self._camera_forward_waypoint(
-                    pos, yaw, [0.0, 0.0, 1.0], nominal_yaw_deg=0.0, max_velocity=0.6, target_name=self.target_mission.upper()
-                )
+                # Once safely inside main room, immediately switch to direct transit to target!
+                if self.target_mission in ("arch", "traverse_arch"):
+                    self.phase = "PHASE_5_EGRESS_STABILIZE"
+                    self.mission_complete = True
+                    diagnosis = "[SYSTEM 2 VLN] Arch clearance complete; station-keeping hover"
+                    wc = WaypointCommand(mode="world", target=[0.0, -3.5, 0.90], yaw_deg=-90.0)
+                elif self.target_mission in ("window", "traverse_window"):
+                    self.phase = "PHASE_1_SECTOR_SCAN"
+                    diagnosis = "[SYSTEM 2 VLN] Main room entered -> Direct sector scan for Left Window"
+                    wc, _, _ = self._camera_forward_waypoint(
+                        pos, yaw, [0.0, 3.8, 1.10], nominal_yaw_deg=90.0, max_velocity=0.6, target_name="Left Window"
+                    )
+                else:
+                    self.phase = "PHASE_2_CORRIDOR_APPROACH"
+                    diagnosis = f"[SYSTEM 2 VLN] Main room entered -> Direct visual intercept to '{self.target_mission.upper()}'"
+                    wc, _, _ = self._camera_forward_waypoint(
+                        pos, yaw, [pos_x, pos_y, 1.0], nominal_yaw_deg=0.0, max_velocity=0.6, target_name=self.target_mission.upper()
+                    )
 
         # ----------------------------------------------------------------------
-        # MISSION 1: TARGET PAD ALPHA (Runway Forward Corridor)
+        # MISSION 1: TARGET PAD ALPHA (Direct Point-to-Point Approach)
         # ----------------------------------------------------------------------
         elif self.target_mission in ("alpha", "corridor"):
             if self.phase == "PHASE_0_LIFTOFF":
@@ -615,26 +620,23 @@ class AutonomousTargetNavigator:
                     wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
 
             if self.phase == "PHASE_2_CORRIDOR_APPROACH":
-                if pos_x < 5.0:
-                    wc, diagnosis, _ = self._camera_forward_waypoint(
-                        pos, yaw, [5.5, 0.0, 1.0], nominal_yaw_deg=0.0, max_velocity=1.2, corridor_width=0.6, target_name="Pad Alpha"
-                    )
-                elif pos_x > 5.9:
-                    wc, diagnosis, _ = self._camera_forward_waypoint(
-                        pos, yaw, [5.5, 0.0, 1.0], nominal_yaw_deg=180.0, max_velocity=1.0, corridor_width=0.6, target_name="Pad Alpha"
-                    )
-                else:
+                dist_to_alpha = math.hypot(pos_x - 5.5, pos_y - 0.0)
+                if dist_to_alpha < 0.25:
                     self.phase = "PHASE_4_PRECISION_HOVER"
                     print("🎯 [PHASE TRANSITION] Pad Alpha visually acquired -> PHASE_4_PRECISION_HOVER")
+                else:
+                    wc, diagnosis, _ = self._camera_forward_waypoint(
+                        pos, yaw, [5.5, 0.0, 1.0], nominal_yaw_deg=0.0 if pos_x < 5.5 else 180.0, max_velocity=1.3, corridor_width=0.6, target_name="Pad Alpha"
+                    )
 
             if self.phase == "PHASE_4_PRECISION_HOVER":
-                diagnosis = "Station-keeping precision hover centered over Target Pad Alpha"
+                diagnosis = "[SYSTEM 2 VLN] Station-keeping precision hover centered over Target Pad Alpha"
                 wc = WaypointCommand(mode="world", target=[5.5, 0.0, 1.0], yaw_deg=yaw, max_velocity=0.4)
                 if abs(pos_x - 5.5) < 0.20 and abs(pos_y) < 0.20:
                     self.mission_complete = True
 
         # ----------------------------------------------------------------------
-        # MISSION 2: ELEVATED PEDESTAL DELTA
+        # MISSION 2: ELEVATED PEDESTAL DELTA (Direct Point-to-Point Approach)
         # ----------------------------------------------------------------------
         elif self.target_mission in ("delta", "pedestal"):
             if self.phase == "PHASE_0_LIFTOFF":
@@ -646,16 +648,17 @@ class AutonomousTargetNavigator:
                     wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
 
             if self.phase == "PHASE_2_CORRIDOR_APPROACH":
-                if pos_x < 7.4:
-                    wc, diagnosis, _ = self._camera_forward_waypoint(
-                        pos, yaw, [8.0, 0.0, 1.10], nominal_yaw_deg=0.0, max_velocity=1.3, corridor_width=0.6, target_name="Platform Delta"
-                    )
-                else:
+                dist_to_delta = math.hypot(pos_x - 8.0, pos_y - 0.0)
+                if dist_to_delta < 0.25:
                     self.phase = "PHASE_4_PRECISION_HOVER"
                     print("🎯 [PHASE TRANSITION] Platform Delta acquired -> PHASE_4_PRECISION_HOVER")
+                else:
+                    wc, diagnosis, _ = self._camera_forward_waypoint(
+                        pos, yaw, [8.0, 0.0, 1.10], nominal_yaw_deg=0.0, max_velocity=1.4, corridor_width=0.6, target_name="Platform Delta"
+                    )
 
             if self.phase == "PHASE_4_PRECISION_HOVER":
-                diagnosis = "Precision elevated hover over Platform Delta (Z=1.10m)"
+                diagnosis = "[SYSTEM 2 VLN] Precision elevated hover over Platform Delta (Z=1.10m)"
                 wc = WaypointCommand(mode="world", target=[8.0, 0.0, 1.10], yaw_deg=yaw, max_velocity=0.4)
                 if abs(pos_x - 8.0) < 0.25 and abs(pos_y) < 0.20:
                     self.mission_complete = True
@@ -676,17 +679,18 @@ class AutonomousTargetNavigator:
                 wc, diagnosis, is_locked = self._camera_forward_waypoint(
                     pos, yaw, [0.0, 3.8, 1.10], nominal_yaw_deg=90.0, max_velocity=0.6, target_name="Left Window Aperture"
                 )
-                if is_locked or abs(yaw - 90.0) < 8.0:
+                if is_locked:
                     self.phase = "PHASE_2_CORRIDOR_APPROACH"
-                    print("✅ [TARGET ACQUIRED] Left Window framed in HUD -> PHASE_2_CORRIDOR_APPROACH")
+                    print("✅ [TARGET ACQUIRED] Left Window framed in HUD -> Direct Intercept PHASE_2_CORRIDOR_APPROACH")
 
             if self.phase == "PHASE_2_CORRIDOR_APPROACH":
-                if pos_y >= 3.5:
+                dist_to_window_approach = math.hypot(pos_x - 0.0, pos_y - 3.8)
+                if dist_to_window_approach < 0.5 or (pos_y >= 3.4 and abs(pos_x) <= 0.6):
                     self.phase = "PHASE_3_APERTURE_INGRESS"
                     print("🚪 [INGRESS ARMED] Traversing inner clearance envelope -> PHASE_3_APERTURE_INGRESS")
                 else:
                     wc, diagnosis, _ = self._camera_forward_waypoint(
-                        pos, yaw, [0.0, 3.8, 1.10], nominal_yaw_deg=90.0, max_velocity=0.8, corridor_width=0.5, target_name="Left Window Glidepath"
+                        pos, yaw, [0.0, 3.8, 1.10], nominal_yaw_deg=90.0, max_velocity=1.2, corridor_width=0.5, target_name="Left Window Direct Glidepath"
                     )
 
             if self.phase == "PHASE_3_APERTURE_INGRESS":
@@ -694,12 +698,12 @@ class AutonomousTargetNavigator:
                     self.phase = "PHASE_5_EGRESS_STABILIZE"
                     print("🏆 [MISSION COMPLETE] Successfully traversed Left Window aperture!")
                 else:
-                    diagnosis = "Passing through Left Window with safety envelope clamping (tilt <= 12°, vel <= 0.6 m/s)"
+                    diagnosis = "[SYSTEM 2 VLN] Aperture Traversal: Clamping tilt <= 12°, vel <= 0.6 m/s"
                     wc = WaypointCommand(mode="world", target=[0.0, 5.8, 1.10], yaw_deg=90.0, max_velocity=0.6, corridor_width=0.4)
                     max_tilt = 12.0
 
             if self.phase == "PHASE_5_EGRESS_STABILIZE":
-                diagnosis = "Aperture traversal complete; station-keeping hover on outer perimeter"
+                diagnosis = "[SYSTEM 2 VLN] Aperture traversal complete; station-keeping hover on outer perimeter"
                 wc = WaypointCommand(mode="world", target=[0.0, 6.0, 1.10], yaw_deg=90.0)
                 self.mission_complete = True
 
@@ -719,18 +723,18 @@ class AutonomousTargetNavigator:
                 wc, diagnosis, is_locked = self._camera_forward_waypoint(
                     pos, yaw, [0.0, -3.8, 0.90], nominal_yaw_deg=-90.0, max_velocity=0.6, target_name="Right Arch Aperture"
                 )
-                yaw_err_arch = min(abs(yaw - (-90.0)), abs(yaw - 270.0))
-                if is_locked or yaw_err_arch < 8.0:
+                if is_locked:
                     self.phase = "PHASE_2_CORRIDOR_APPROACH"
-                    print("✅ [TARGET ACQUIRED] Right Arch framed in HUD -> PHASE_2_CORRIDOR_APPROACH")
+                    print("✅ [TARGET ACQUIRED] Right Arch framed in HUD -> Direct Intercept PHASE_2_CORRIDOR_APPROACH")
 
             if self.phase == "PHASE_2_CORRIDOR_APPROACH":
-                if pos_y <= -3.5:
+                dist_to_arch_approach = math.hypot(pos_x - 0.0, pos_y - (-3.8))
+                if dist_to_arch_approach < 0.5 or (pos_y <= -3.4 and abs(pos_x) <= 0.6):
                     self.phase = "PHASE_3_APERTURE_INGRESS"
                     print("⛩️ [INGRESS ARMED] Traversing arch inner envelope -> PHASE_3_APERTURE_INGRESS")
                 else:
                     wc, diagnosis, _ = self._camera_forward_waypoint(
-                        pos, yaw, [0.0, -3.8, 0.90], nominal_yaw_deg=-90.0, max_velocity=0.8, corridor_width=0.5, target_name="Right Arch Glidepath"
+                        pos, yaw, [0.0, -3.8, 0.90], nominal_yaw_deg=-90.0, max_velocity=1.2, corridor_width=0.5, target_name="Right Arch Direct Glidepath"
                     )
 
             if self.phase == "PHASE_3_APERTURE_INGRESS":
@@ -738,12 +742,12 @@ class AutonomousTargetNavigator:
                     self.phase = "PHASE_5_EGRESS_STABILIZE"
                     print("🏆 [MISSION COMPLETE] Successfully traversed Right Arch aperture!")
                 else:
-                    diagnosis = "Passing through Right Arch opening (tilt <= 12°, vel <= 0.6 m/s)"
+                    diagnosis = "[SYSTEM 2 VLN] Passing through Right Arch opening (tilt <= 12°, vel <= 0.6 m/s)"
                     wc = WaypointCommand(mode="world", target=[0.0, -5.8, 0.90], yaw_deg=-90.0, max_velocity=0.6, corridor_width=0.4)
                     max_tilt = 12.0
 
             if self.phase == "PHASE_5_EGRESS_STABILIZE":
-                diagnosis = "Arch traversal complete; station-keeping hover on outer perimeter"
+                diagnosis = "[SYSTEM 2 VLN] Arch traversal complete; station-keeping hover on outer perimeter"
                 wc = WaypointCommand(mode="world", target=[0.0, -6.0, 0.90], yaw_deg=-90.0)
                 self.mission_complete = True
 
@@ -760,16 +764,17 @@ class AutonomousTargetNavigator:
                     wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=0.0)
 
             if self.phase == "PHASE_2_CORRIDOR_APPROACH":
-                if abs(pos_x - 3.5) < 0.25 and abs(pos_y) < 0.25:
+                dist_to_poles = math.hypot(pos_x - 3.5, pos_y - 0.0)
+                if dist_to_poles < 0.25:
                     self.phase = "PHASE_4_PRECISION_HOVER"
                     print("🎯 [PHASE TRANSITION] Runway poles reached -> PHASE_4_PRECISION_HOVER")
                 else:
                     wc, diagnosis, _ = self._camera_forward_waypoint(
-                        pos, yaw, [3.5, 0.0, 1.0], nominal_yaw_deg=0.0 if pos_x < 3.5 else 180.0, max_velocity=1.0, corridor_width=0.5, target_name="Runway Poles"
+                        pos, yaw, [3.5, 0.0, 1.0], nominal_yaw_deg=0.0 if pos_x < 3.5 else 180.0, max_velocity=1.1, corridor_width=0.5, target_name="Runway Poles"
                     )
 
             if self.phase == "PHASE_4_PRECISION_HOVER":
-                diagnosis = "Holding precision station-keeping hover centered between runway poles (Y=±0.9m)"
+                diagnosis = "[SYSTEM 2 VLN] Precision station-keeping hover centered between runway poles"
                 wc = WaypointCommand(mode="world", target=[3.5, 0.0, 1.0], yaw_deg=yaw, max_velocity=0.4, corridor_width=0.4)
                 if abs(pos_x - 3.5) < 0.20 and abs(pos_y) < 0.20:
                     self.mission_complete = True
@@ -778,14 +783,15 @@ class AutonomousTargetNavigator:
         # MISSION 6: HOME / ORIGIN PAD
         # ----------------------------------------------------------------------
         elif self.target_mission in ("home", "origin"):
-            if abs(pos_x) < 0.20 and abs(pos_y) < 0.20:
+            dist_to_home = math.hypot(pos_x - 0.0, pos_y - 0.0)
+            if dist_to_home < 0.25:
                 self.phase = "PHASE_4_PRECISION_HOVER"
-                diagnosis = "Station-keeping precision hover over Origin Pad [0, 0, 1.0]"
+                diagnosis = "[SYSTEM 2 VLN] Station-keeping precision hover over Origin Pad [0, 0, 1.0]"
                 wc = WaypointCommand(mode="world", target=[0.0, 0.0, 1.0], yaw_deg=yaw, max_velocity=0.4)
                 self.mission_complete = True
             else:
                 wc, diagnosis, _ = self._camera_forward_waypoint(
-                    pos, yaw, [0.0, 0.0, 1.0], nominal_yaw_deg=180.0, max_velocity=1.2, corridor_width=0.5, target_name="Origin Pad"
+                    pos, yaw, [0.0, 0.0, 1.0], nominal_yaw_deg=180.0 if pos_x > 0 else 0.0, max_velocity=1.2, corridor_width=0.5, target_name="Origin Pad"
                 )
 
         else:

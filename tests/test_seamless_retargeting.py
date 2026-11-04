@@ -52,6 +52,27 @@ class TestSeamlessNavigationRetargeting(unittest.TestCase):
         self.assertEqual(res_win["mission"], "window")
         self.assertIn(nav_coordinator.navigator.phase, ("PHASE_RUNWAY_RETURN_HUB", "PHASE_1_SECTOR_SCAN"))
 
+    def test_direct_navigation_does_not_route_through_origin(self):
+        """Verifies drone at Platform Delta (X=8.0m) navigates directly to Window, not origin [0,0]."""
+        with nav_coordinator.sim_lock:
+            nav_coordinator.sim.data.qpos[0:3] = [8.0, 0.0, 1.10]
+        nav_coordinator.navigator.phase = "PHASE_4_PRECISION_HOVER"
+
+        # Retarget to window
+        nav_coordinator.navigator.retarget("window")
+        self.assertEqual(nav_coordinator.navigator.phase, "PHASE_1_SECTOR_SCAN")
+
+        # Step cognitive reasoner
+        patch = nav_coordinator.navigator._visual_inertial_reasoner(
+            telemetry=nav_coordinator.get_telemetry_snapshot(),
+            sim_time=5.0,
+        )
+
+        # Target must be either holding in-place at X=8.0 (visual saccade) or direct to window entrance [0, 3.8, 1.1]
+        cmd_tgt = patch.waypoint_command.target
+        self.assertNotEqual(cmd_tgt, [0.0, 0.0, 1.0], "Must NEVER route back through origin [0, 0, 1.0]")
+        self.assertIn("[SYSTEM 2 VLN]", patch.diagnosis)
+
     def test_explicit_reset_resets_origin(self):
         """Verifies passing reset=True resets drone to origin."""
         nav_coordinator.start_mission(target="alpha")
