@@ -37,7 +37,7 @@ from vlm.evaluate_model import run_evaluator as run_dual_evaluator
 
 SUITE_MAP = {
     "single": {
-        "desc": "Single-Drone Target Navigation & Waypoint Guidance (SD-01..07)",
+        "desc": "Single-Drone Target Navigation & Waypoint Guidance (SD-01..14)",
         "file": "vlm/test_cases_single.json",
         "runner": "single",
     },
@@ -70,8 +70,8 @@ def main():
         "--backend",
         type=str,
         default="ground_truth",
-        choices=["ground_truth", "gemini", "ollama", "mlx", "cloud"],
-        help="Inference backend to benchmark (default: ground_truth)",
+        choices=["ground_truth", "gemini", "gemini-live", "live", "ollama", "mlx", "cloud"],
+        help="Inference backend to benchmark (default: ground_truth, supports 'gemini-live' over WebSockets)",
     )
     parser.add_argument(
         "--model",

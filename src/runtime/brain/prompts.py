@@ -17,7 +17,7 @@ Output ONLY raw valid JSON. No markdown backticks (no ```json), no prose. Keep d
 
 [SPATIAL SECTOR MAP (Global Arena Coordinates)]
 - SECTOR_FORWARD (Heading ~0°):
-  • Runway Flight Corridor with Hazard Pylons at x=3.5m, y=±0.9m (passage width 1.8m).
+  • Runway Flight Corridor with Hazard Pylons at x=3.5m, y=±0.9m (passage width 1.8m framing entrance to Pad Alpha).
   • Target Pad Alpha: Primary forward landing pad (Safety Orange & Amber rings) at x=5.5m, y=0.0m.
   • Elevated Pedestal Delta: Raised hover platform (0.70m height, Yellow caution disc) at x=8.0m, y=0.0m.
   • Target Pad Bravo: Left-flank waypoint pad (Cyan / Neon Blue rings) at x=11.0m, y=+2.2m.
@@ -32,30 +32,34 @@ Output ONLY raw valid JSON. No markdown backticks (no ```json), no prose. Keep d
 [FLIGHT PHASES & ACTIVE PERCEPTION RULES]
 1. Target in Unobservable Sector (Active Perception Saccade - SECTOR_SCAN):
    - If the active objective requires navigating to the Left Window but current heading is ~0°:
-     Command an in-place yaw rotation to face the window: yaw_deg: +90.0, target: [0.0, 0.0, 0.0], mode: "relative_body".
+     Command an in-place yaw rotation to face the window: flight_phase: "SECTOR_SCAN", yaw_deg: +90.0, target: [0.0, 0.0, 0.0], mode: "relative_body", max_velocity: 0.5, corridor_width: 0.6.
    - If the active objective requires navigating to the Right Arch but current heading is ~0°:
-     Command an in-place yaw rotation to face the arch: yaw_deg: -90.0, target: [0.0, 0.0, 0.0], mode: "relative_body".
+     Command an in-place yaw rotation to face the arch: flight_phase: "SECTOR_SCAN", yaw_deg: -90.0, target: [0.0, 0.0, 0.0], mode: "relative_body", max_velocity: 0.5, corridor_width: 0.6.
    - Hold current hover altitude and zero horizontal velocity during rotation.
 
 2. Aperture Approach & Ingress (CORRIDOR_APPROACH & APERTURE_INGRESS):
-   - When facing the aperture, track the HUD approach corridor line straight into the center.
+   - When facing the aperture opening, track the HUD approach corridor line straight into the center.
    - Match flight altitude to opening center (Z=1.10m for window, Z=0.90m for arch).
-   - Ingress traversal: restrict max_tilt_deg to 12.0° and max_velocity to 0.60 m/s to stay safely inside the inner green clearance box.
+   - Ingress traversal: set flight_phase: "APERTURE_INGRESS", target: [1.8, 0.0, 0.0], yaw_deg: 0.0, max_velocity: 0.6, corridor_width: 0.4, and restrict safety_envelope.max_tilt_deg to 12.0° to pass safely within the inner clearance frame.
 
-3. Target Pad Alignment & Hover (CORRIDOR_APPROACH & HOVER_HOLD):
-   - Approaching / Aligning with Target Pad Alpha: Command forward progress along the centered corridor (target: [2.0, 0.0, 0.0], mode: "relative_body", yaw_deg: 0.0).
-   - Elevated Pedestal Delta Hover: Command forward target onto the elevated platform disc (target: [2.5, 0.0, 0.0], hold altitude Z=1.1m).
-   - Lateral Offset to Pad Bravo (Cyan): Vector forward-left with positive Y offset (target: [2.2, 0.8, 0.0], yaw_deg: +15.0°).
-   - Lateral Offset to Pad Charlie (Emerald): Vector forward-right with negative Y offset (target: [2.2, -0.8, 0.0], yaw_deg: -15.0°).
-   - Pylon Gate Traversal: Navigate directly between pylons with strict centering (target: [2.0, 0.0, 0.0], corridor_width: 0.5m, dy: 0.0).
+3. Target Pad Alignment & Forward Progress (CORRIDOR_APPROACH):
+   - Approaching / Aligning with Target Pad Alpha: Set flight_phase: "CORRIDOR_APPROACH", target: [2.0, 0.0, 0.0], mode: "relative_body", yaw_deg: 0.0, max_velocity: 1.0, corridor_width: 0.6.
+   - Navigate onto Elevated Pedestal Delta platform disc: Set flight_phase: "CORRIDOR_APPROACH", target: [2.5, 0.0, 0.0], yaw_deg: 0.0, max_velocity: 0.8, corridor_width: 0.5, holding elevated altitude.
+   - Lateral Offset to Pad Bravo (Cyan): Vector forward-left with positive Y offset: set flight_phase: "CORRIDOR_APPROACH", target: [2.2, 0.8, 0.0], yaw_deg: +15.0°, corridor_width: 0.7.
+   - Lateral Offset to Pad Charlie (Emerald): Vector forward-right with negative Y offset: set flight_phase: "CORRIDOR_APPROACH", target: [2.2, -0.8, 0.0], yaw_deg: -15.0°, corridor_width: 0.7.
+   - Pylon Gate Obstacle Traversal: Navigate directly between pylons with strict centering: set flight_phase: "CORRIDOR_APPROACH", target: [2.0, 0.0, 0.0], yaw_deg: 0.0, max_velocity: 0.8, corridor_width: 0.5.
+
+4. Station-Keeping Hover & Precision Hold (HOVER_HOLD):
+   - Station-keeping hover between 2 Runway Poles: Positioned between the pylons (Y=±0.9m) framing Pad Alpha entrance. Set flight_phase: "HOVER_HOLD", target: [0.0, 0.0, 0.0], yaw_deg: 0.0, max_velocity: 0.5, corridor_width: 0.4.
+   - Station-keeping hover atop Elevated Pedestal Delta: Centered directly over the yellow caution disc (clearance 0.35m-0.40m above platform). Set flight_phase: "HOVER_HOLD", target: [0.0, 0.0, 0.0], yaw_deg: 0.0, max_velocity: 0.5, corridor_width: 0.4.
 
 [CHAOS & DISTURBANCE REJECTION (Strict Rules)]
 1. Wind / Force Disturbance (feedforward_force_offset):
    - If telemetry reports unmodeled_force_disturbance F_ext = [Fx, Fy, Fz], command EQUAL AND OPPOSITE feedforward:
-     dF = -F_ext (e.g. if Fx = +5.2N, command dFx = -5.2N). Hold station waypoint at [0.0, 0.0, 0.0] and set pos_kp = 1.2.
+     dF = -F_ext (e.g. if Fx = +5.2N, command dFx = -5.2N; if Fy = +4.8N, command dFy = -4.8N). Set flight_phase: "HOVER_HOLD", hold station waypoint at [0.0, 0.0, 0.0], set pos_kp = 1.2.
    - In calm flight: [0.0, 0.0, 0.0].
 2. Motor Degradation (motor_trim_scale):
-   - If Motor 1 is degraded (40% power efficiency / elevated M1 command), set motor_trim_scale: [2.50, 1.0, 1.0, 1.0] to equalize thrust. Tighten safety_envelope.max_tilt_deg to 18.0.
+   - If Motor 1 is degraded (40% power efficiency / elevated M1 command), set flight_phase: "HOVER_HOLD", motor_trim_scale: [2.50, 1.0, 1.0, 1.0] to equalize thrust. Tighten safety_envelope.max_tilt_deg to 18.0. Hold station at [0.0, 0.0, 0.0].
    - In nominal flight: [1.0, 1.0, 1.0, 1.0].
 3. Sensor Noise / Gyro Chatter:
    - If gyro RMS > 1.0 rad/s or oscillation detected, set att_kp = 0.40, att_kd = 1.60.

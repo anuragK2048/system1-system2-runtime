@@ -1,17 +1,24 @@
 """Single-Drone Target Navigation VLM Test Suite Generator.
 
 Generates:
-1. Synthetic 480x360 MuJoCo FPV camera frames for 7 critical single-drone flight scenarios:
+1. Synthetic 480x360 MuJoCo FPV camera frames for 14 critical single-drone flight scenarios:
    - SD-01: Nominal Pad Alpha Hover & Alignment
-   - SD-02: Elevated Pedestal Delta Hover Acquisition
+   - SD-02: Delta: Navigate to Raised Disc Platform (Pedestal Approach)
    - SD-03: Lateral Offset to Target Pad Bravo (Cyan)
    - SD-04: Lateral Offset to Target Pad Charlie (Emerald)
    - SD-05: Pylon Gate Obstacle Traversal
    - SD-06: Target Pad Alpha Station-Keeping under Wind Gust (+5.2N Headwind)
    - SD-07: Degraded Motor Hover over Target Pad (M1 40% Power)
+   - SD-08: Alpha: Precision Hover Between 2 Runway Poles (Pylon Centering)
+   - SD-09: Delta: Precision Station-Keeping Atop Raised Disc Platform
+   - SD-10: Left Window Sector Scan (Unobservable Sector Saccade +90°)
+   - SD-11: Left Window Aperture Ingress (Traversing Window at Z=1.10m)
+   - SD-12: Right Arch Sector Scan (Unobservable Sector Saccade -90°)
+   - SD-13: Right Arch Aperture Ingress (Traversing Arch at Z=0.90m)
+   - SD-14: Delta: Platform Station-Keeping under Crosswind (+4.8N Crosswind)
 2. Ground truth specification file: vlm/test_cases_single.json containing:
    - Mission instructions & realistic telemetry states
-   - Ground truth System-2 patches (WaypointCommand, feedforward, trims, gains)
+   - Ground truth System-2 patches (WaypointCommand, flight_phase, feedforward, trims, gains)
    - Strict validation rules for target accuracy, safety bounds, and disturbance rejection
 
 Usage:
@@ -19,17 +26,54 @@ Usage:
 """
 
 import json
+import math
+import sys
 from pathlib import Path
 from typing import Dict, Any, List
 import numpy as np
 import mujoco
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from vlm.hud_overlay import HUDProjector, Aperture3D
 
 SCENE_PATH = Path("assets/skydio_x2/scene.xml")
 OUTPUT_DIR = Path("vlm/test_cases_single")
 JSON_PATH = Path("vlm/test_cases_single.json")
 WIDTH = 480
 HEIGHT = 360
+
+ARENA_APERTURES = [
+    Aperture3D(
+        name="WINDOW_LEFT",
+        center=(0.0, 5.0, 1.10),
+        width=1.40,
+        height=1.20,
+        yaw=math.radians(90.0),
+        shape="window",
+        color=(255, 190, 0),       # Amber Gold
+        inner_color=(0, 255, 130),  # Neon Mint
+        safety_margin=0.20,
+        show_corridor=True,
+        approach_distance=2.0,
+    ),
+    Aperture3D(
+        name="ARCH_RIGHT",
+        center=(0.0, -5.0, 0.90),
+        width=1.50,
+        height=1.85,
+        yaw=math.radians(-90.0),
+        shape="arch",
+        color=(255, 140, 0),       # High-Vis Orange
+        inner_color=(0, 255, 130),  # Neon Mint
+        safety_margin=0.20,
+        show_corridor=True,
+        approach_distance=2.0,
+    ),
+]
 
 
 def add_hud(
@@ -90,6 +134,7 @@ def generate_suite():
     model = mujoco.MjModel.from_xml_path(str(SCENE_PATH))
     data = mujoco.MjData(model)
     renderer = mujoco.Renderer(model, height=HEIGHT, width=WIDTH)
+    hud_projector = HUDProjector(camera_name="fpv", width=WIDTH, height=HEIGHT)
 
     test_cases: List[Dict[str, Any]] = []
 
@@ -126,6 +171,7 @@ def generate_suite():
         },
         "ground_truth": {
             "diagnosis": "Nominal flight aligned with Target Pad Alpha along forward corridor",
+            "flight_phase": "CORRIDOR_APPROACH",
             "waypoint_command": {
                 "mode": "relative_body",
                 "target": [2.0, 0.0, 0.0],
@@ -168,11 +214,17 @@ def generate_suite():
                 "type": "ones_vector",
                 "desc": "Nominal motor trims during unperturbed flight",
             },
+            {
+                "field": "flight_phase",
+                "type": "in_set",
+                "values": ["CORRIDOR_APPROACH", "HOVER_HOLD"],
+                "desc": "Corridor approach flight phase toward forward target",
+            },
         ],
     })
 
     # ==========================================================================
-    # SD-02: Elevated Pedestal Delta Hover Acquisition
+    # SD-02: Delta: Navigate to Raised Disc Platform (Pedestal Approach)
     # Drone approaching elevated platform at (8.0, 0.0, 0.70), positioned at (5.5, 0.0, 1.05)
     # ==========================================================================
     data.qpos[0:3] = [5.5, 0.0, 1.05]
@@ -190,10 +242,10 @@ def generate_suite():
 
     test_cases.append({
         "id": "SD-02",
-        "name": "Elevated Pedestal Delta Hover Acquisition",
+        "name": "Delta: Navigate to Raised Disc Platform",
         "category": "Elevated Target Acquisition",
         "image_path": str(p2),
-        "instruction": "Approach Elevated Pedestal Delta and command hover waypoint directly over the platform disc (clearance 0.35m above platform top).",
+        "instruction": "Navigate forward onto Elevated Station Delta and command hover waypoint directly over the platform disc (clearance 0.35m above platform top).",
         "telemetry": {
             "altitude_m": 1.05,
             "velocity_body_mps": [0.08, 0.00, 0.00],
@@ -204,6 +256,7 @@ def generate_suite():
         },
         "ground_truth": {
             "diagnosis": "Approaching Elevated Pedestal Delta platform, commanding elevated target hover",
+            "flight_phase": "CORRIDOR_APPROACH",
             "waypoint_command": {
                 "mode": "relative_body",
                 "target": [2.5, 0.0, 0.0],
@@ -247,6 +300,12 @@ def generate_suite():
                 "type": "ones_vector",
                 "desc": "Nominal motor trims during platform acquisition",
             },
+            {
+                "field": "flight_phase",
+                "type": "in_set",
+                "values": ["CORRIDOR_APPROACH", "HOVER_HOLD"],
+                "desc": "Corridor approach to elevated pedestal platform",
+            },
         ],
     })
 
@@ -284,6 +343,7 @@ def generate_suite():
         },
         "ground_truth": {
             "diagnosis": "Visual acquisition of cyan Target Pad Bravo, vectoring forward-left",
+            "flight_phase": "CORRIDOR_APPROACH",
             "waypoint_command": {
                 "mode": "relative_body",
                 "target": [2.2, 0.8, 0.0],
@@ -365,6 +425,7 @@ def generate_suite():
         },
         "ground_truth": {
             "diagnosis": "Visual acquisition of emerald Target Pad Charlie, vectoring forward-right",
+            "flight_phase": "CORRIDOR_APPROACH",
             "waypoint_command": {
                 "mode": "relative_body",
                 "target": [2.2, -0.8, 0.0],
@@ -445,6 +506,7 @@ def generate_suite():
         },
         "ground_truth": {
             "diagnosis": "Approaching pylon gate obstacle; maintaining centered lane through passage",
+            "flight_phase": "CORRIDOR_APPROACH",
             "waypoint_command": {
                 "mode": "relative_body",
                 "target": [2.0, 0.0, 0.0],
@@ -526,6 +588,7 @@ def generate_suite():
         },
         "ground_truth": {
             "diagnosis": "Persistent headwind disturbance (+5.2N along +X); injecting opposing feedforward",
+            "flight_phase": "HOVER_HOLD",
             "waypoint_command": {
                 "mode": "relative_body",
                 "target": [0.0, 0.0, 0.0],
@@ -601,6 +664,7 @@ def generate_suite():
         },
         "ground_truth": {
             "diagnosis": "Motor 1 severely degraded at 40% efficiency; applying 2.50x motor trim scale",
+            "flight_phase": "HOVER_HOLD",
             "waypoint_command": {
                 "mode": "relative_body",
                 "target": [0.0, 0.0, 0.0],
@@ -653,6 +717,614 @@ def generate_suite():
                 "min": 15.0,
                 "max": 20.0,
                 "desc": "Tightens maximum allowable tilt envelope during degraded actuator flight",
+            },
+        ],
+    })
+
+    # ==========================================================================
+    # SD-08: Alpha: Precision Hover Between 2 Runway Poles
+    # Drone at (3.5, 0.0, 1.0), heading 000°, centered between pylons at y=±0.9m
+    # ==========================================================================
+    data.qpos[0:3] = [3.5, 0.0, 1.0]
+    data.qpos[3:7] = [1.0, 0.0, 0.0, 0.0]
+    mujoco.mj_forward(model, data)
+    renderer.update_scene(data, camera="fpv")
+    img8 = add_hud(
+        Image.fromarray(renderer.render()),
+        top_text="FPV: fpv | ALT: 1.00m | HDG: 000° | STATION-KEEPING: RUNWAY POLES",
+        bottom_text="BETWEEN RUNWAY POLES (Y=±0.9m) | HOLD HOVER CENTERED | DY=0.0m",
+        reticle_color=(0, 255, 200),
+    )
+    p8 = OUTPUT_DIR / "sd_08_hover_between_runway_poles.jpg"
+    img8.save(p8, format="JPEG", quality=85)
+
+    test_cases.append({
+        "id": "SD-08",
+        "name": "Alpha: Precision Hover Between 2 Runway Poles",
+        "category": "Runway Corridor Station-Keeping",
+        "image_path": str(p8),
+        "instruction": "Hold precision station-keeping hover centered between the two runway poles (pylons at Y=±0.9m) framing Pad Alpha. Maintain 1.0m altitude, keep zero lateral drift (stay equidistant between poles at dy=0.0m), and hold station.",
+        "telemetry": {
+            "altitude_m": 1.00,
+            "velocity_body_mps": [0.01, 0.00, 0.00],
+            "attitude_deg": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
+            "unmodeled_force_disturbance_N": [0.0, 0.0, 0.0],
+            "motor_controls_N": [3.25, 3.25, 3.25, 3.25],
+            "gyro_rms_radps": [0.08, 0.09, 0.06],
+        },
+        "ground_truth": {
+            "diagnosis": "Holding precision station-keeping hover centered between the runway poles framing Pad Alpha",
+            "flight_phase": "HOVER_HOLD",
+            "waypoint_command": {
+                "mode": "relative_body",
+                "target": [0.0, 0.0, 0.0],
+                "yaw_deg": 0.0,
+                "max_velocity": 0.5,
+                "corridor_width": 0.4,
+            },
+            "feedforward_force_offset": [0.0, 0.0, 0.0],
+            "motor_trim_scale": [1.0, 1.0, 1.0, 1.0],
+            "gain_multipliers": {"pos_kp": 1.0, "pos_kd": 1.0, "att_kp": 1.0, "att_kd": 1.0},
+            "safety_envelope": {"max_tilt_deg": 20.0},
+        },
+        "validation_rules": [
+            {
+                "field": "waypoint_command.target[0]",
+                "type": "abs_max",
+                "max": 0.4,
+                "desc": "Maintains station-keeping hover hold between runway poles",
+            },
+            {
+                "field": "waypoint_command.target[1]",
+                "type": "abs_max",
+                "max": 0.25,
+                "desc": "Strict lateral centering equidistant between both runway poles",
+            },
+            {
+                "field": "waypoint_command.target[2]",
+                "type": "abs_max",
+                "max": 0.25,
+                "desc": "Maintains 1.0m hover altitude",
+            },
+            {
+                "field": "feedforward_force_offset",
+                "type": "zero_vector",
+                "desc": "Zero feedforward force during calm station-keeping",
+            },
+            {
+                "field": "motor_trim_scale",
+                "type": "ones_vector",
+                "desc": "Nominal motor trims",
+            },
+            {
+                "field": "flight_phase",
+                "type": "in_set",
+                "values": ["HOVER_HOLD", "CORRIDOR_APPROACH"],
+                "desc": "Station-keeping hover hold between poles",
+            },
+        ],
+    })
+
+    # ==========================================================================
+    # SD-09: Delta: Precision Station-Keeping Atop Raised Disc Platform
+    # Drone at (8.0, 0.0, 1.10), heading 000°, positioned right over yellow disc
+    # ==========================================================================
+    data.qpos[0:3] = [8.0, 0.0, 1.10]
+    data.qpos[3:7] = [1.0, 0.0, 0.0, 0.0]
+    mujoco.mj_forward(model, data)
+    renderer.update_scene(data, camera="fpv")
+    img9 = add_hud(
+        Image.fromarray(renderer.render()),
+        top_text="FPV: fpv | ALT: 1.10m | HDG: 000° | STATION-KEEPING: DELTA DISC",
+        bottom_text="ELEVATED PEDESTAL DELTA | TOP Z: 0.70m | CLEARANCE: 0.40m | HOLD HOVER",
+        reticle_color=(255, 230, 50),
+    )
+    p9 = OUTPUT_DIR / "sd_09_hover_atop_raised_disc_platform.jpg"
+    img9.save(p9, format="JPEG", quality=85)
+
+    test_cases.append({
+        "id": "SD-09",
+        "name": "Delta: Precision Station-Keeping Atop Raised Disc Platform",
+        "category": "Elevated Platform Station-Keeping",
+        "image_path": str(p9),
+        "instruction": "Maintain precision station-keeping hover directly atop Elevated Pedestal Delta (centered over the yellow caution disc). Hold 1.10m altitude (0.40m clearance above platform disc) and zero horizontal drift.",
+        "telemetry": {
+            "altitude_m": 1.10,
+            "velocity_body_mps": [0.00, 0.00, 0.00],
+            "attitude_deg": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
+            "unmodeled_force_disturbance_N": [0.0, 0.0, 0.0],
+            "motor_controls_N": [3.25, 3.25, 3.25, 3.25],
+            "gyro_rms_radps": [0.07, 0.08, 0.06],
+        },
+        "ground_truth": {
+            "diagnosis": "Holding precision station-keeping hover directly atop Elevated Pedestal Delta yellow disc",
+            "flight_phase": "HOVER_HOLD",
+            "waypoint_command": {
+                "mode": "relative_body",
+                "target": [0.0, 0.0, 0.0],
+                "yaw_deg": 0.0,
+                "max_velocity": 0.5,
+                "corridor_width": 0.4,
+            },
+            "feedforward_force_offset": [0.0, 0.0, 0.0],
+            "motor_trim_scale": [1.0, 1.0, 1.0, 1.0],
+            "gain_multipliers": {"pos_kp": 1.0, "pos_kd": 1.0, "att_kp": 1.0, "att_kd": 1.0},
+            "safety_envelope": {"max_tilt_deg": 18.0},
+        },
+        "validation_rules": [
+            {
+                "field": "waypoint_command.target[0]",
+                "type": "abs_max",
+                "max": 0.4,
+                "desc": "Maintains station hover over Elevated Pedestal Delta disc",
+            },
+            {
+                "field": "waypoint_command.target[1]",
+                "type": "abs_max",
+                "max": 0.3,
+                "desc": "Centered laterally over pedestal disc",
+            },
+            {
+                "field": "waypoint_command.target[2]",
+                "type": "abs_max",
+                "max": 0.25,
+                "desc": "Maintains elevated hover clearance above platform disc",
+            },
+            {
+                "field": "feedforward_force_offset",
+                "type": "zero_vector",
+                "desc": "Zero feedforward during calm elevated hover",
+            },
+            {
+                "field": "motor_trim_scale",
+                "type": "ones_vector",
+                "desc": "Nominal motor trims",
+            },
+            {
+                "field": "flight_phase",
+                "type": "in_set",
+                "values": ["HOVER_HOLD", "CORRIDOR_APPROACH"],
+                "desc": "Hover hold flight phase atop elevated pedestal disc",
+            },
+        ],
+    })
+
+    # ==========================================================================
+    # SD-10: Left Window Sector Scan (Unobservable Sector Saccade +90°)
+    # Drone at (0.0, 0.0, 1.0), heading 000°, window is at +90° flank
+    # ==========================================================================
+    data.qpos[0:3] = [0.0, 0.0, 1.0]
+    data.qpos[3:7] = [1.0, 0.0, 0.0, 0.0]
+    mujoco.mj_forward(model, data)
+    renderer.update_scene(data, camera="fpv")
+    img10 = add_hud(
+        Image.fromarray(renderer.render()),
+        top_text="FPV: fpv | ALT: 1.00m | HDG: 000° | MISSION: LEFT WINDOW INGRESS",
+        bottom_text="TARGET IN SECTOR_LEFT (+90°) UNOBSERVABLE | EXECUTE ACTIVE IN-PLACE YAW SACCADE",
+        reticle_color=(0, 220, 255),
+    )
+    p10 = OUTPUT_DIR / "sd_10_left_window_sector_scan.jpg"
+    img10.save(p10, format="JPEG", quality=85)
+
+    test_cases.append({
+        "id": "SD-10",
+        "name": "Left Window Sector Scan (Unobservable Sector Saccade +90°)",
+        "category": "Active Perception Saccade",
+        "image_path": str(p10),
+        "instruction": "Objective is Left Window located at Y=+5.0m in Sector Left. Current heading is 000° (window unobservable). Perform an active perception in-place yaw saccade to face Sector Left (+90°).",
+        "telemetry": {
+            "altitude_m": 1.00,
+            "velocity_body_mps": [0.00, 0.00, 0.00],
+            "attitude_deg": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
+            "unmodeled_force_disturbance_N": [0.0, 0.0, 0.0],
+            "motor_controls_N": [3.25, 3.25, 3.25, 3.25],
+            "gyro_rms_radps": [0.08, 0.08, 0.06],
+        },
+        "ground_truth": {
+            "diagnosis": "Left Window in unobservable Sector Left (+90°); executing active in-place yaw saccade",
+            "flight_phase": "SECTOR_SCAN",
+            "waypoint_command": {
+                "mode": "relative_body",
+                "target": [0.0, 0.0, 0.0],
+                "yaw_deg": 90.0,
+                "max_velocity": 0.5,
+                "corridor_width": 0.6,
+            },
+            "feedforward_force_offset": [0.0, 0.0, 0.0],
+            "motor_trim_scale": [1.0, 1.0, 1.0, 1.0],
+            "gain_multipliers": {"pos_kp": 1.0, "pos_kd": 1.0, "att_kp": 1.0, "att_kd": 1.0},
+            "safety_envelope": {"max_tilt_deg": 20.0},
+        },
+        "validation_rules": [
+            {
+                "field": "waypoint_command.yaw_deg",
+                "type": "range",
+                "min": 75.0,
+                "max": 95.0,
+                "desc": "Commands ~+90° yaw rotation to acquire Left Window",
+            },
+            {
+                "field": "waypoint_command.target[0]",
+                "type": "abs_max",
+                "max": 0.5,
+                "desc": "Rotates in-place with zero forward translation",
+            },
+            {
+                "field": "waypoint_command.target[1]",
+                "type": "abs_max",
+                "max": 0.5,
+                "desc": "Rotates in-place with zero lateral translation",
+            },
+            {
+                "field": "flight_phase",
+                "type": "exact",
+                "value": "SECTOR_SCAN",
+                "desc": "Sector scan active perception phase",
+            },
+            {
+                "field": "feedforward_force_offset",
+                "type": "zero_vector",
+                "desc": "Zero feedforward during unforced yaw turn",
+            },
+            {
+                "field": "motor_trim_scale",
+                "type": "ones_vector",
+                "desc": "Nominal motor trims",
+            },
+        ],
+    })
+
+    # ==========================================================================
+    # SD-11: Left Window Aperture Ingress (Traversing Window at Z=1.10m)
+    # Drone at (0.0, 3.2, 1.10), yaw = +90° looking directly at window opening at y=5.0m
+    # ==========================================================================
+    yaw11 = np.radians(90)
+    data.qpos[0:3] = [0.0, 3.2, 1.10]
+    data.qpos[3:7] = [np.cos(yaw11 / 2), 0.0, 0.0, np.sin(yaw11 / 2)]
+    mujoco.mj_forward(model, data)
+    cam11 = hud_projector.get_camera_extrinsics(model, data)
+    renderer.update_scene(data, camera="fpv")
+    base_img11 = Image.fromarray(renderer.render())
+    img11 = hud_projector.overlay_hud(
+        base_img11,
+        cam11,
+        drone_pos=np.array([0.0, 3.2, 1.10]),
+        apertures=[ARENA_APERTURES[0]],
+        mode_str="APERTURE INGRESS: LEFT WINDOW",
+    )
+    p11 = OUTPUT_DIR / "sd_11_left_window_aperture_ingress.jpg"
+    img11.save(p11, format="JPEG", quality=85)
+
+    test_cases.append({
+        "id": "SD-11",
+        "name": "Left Window Aperture Ingress",
+        "category": "Aperture Traversal",
+        "image_path": str(p11),
+        "instruction": "Traverse forward through the Left Window aperture opening at Z=1.10m. Maintain tight attitude safety tilt envelope (max 12.0°) and approach velocity (0.6 m/s) to pass safely within the inner clearance frame.",
+        "telemetry": {
+            "altitude_m": 1.10,
+            "velocity_body_mps": [0.04, 0.00, 0.00],
+            "attitude_deg": {"roll": 0.0, "pitch": 0.0, "yaw": 90.0},
+            "unmodeled_force_disturbance_N": [0.0, 0.0, 0.0],
+            "motor_controls_N": [3.25, 3.25, 3.25, 3.25],
+            "gyro_rms_radps": [0.08, 0.09, 0.07],
+        },
+        "ground_truth": {
+            "diagnosis": "Aligned with Left Window aperture center; traversing through opening with tightened 12° tilt clamp",
+            "flight_phase": "APERTURE_INGRESS",
+            "waypoint_command": {
+                "mode": "relative_body",
+                "target": [1.8, 0.0, 0.0],
+                "yaw_deg": 0.0,
+                "max_velocity": 0.6,
+                "corridor_width": 0.4,
+            },
+            "feedforward_force_offset": [0.0, 0.0, 0.0],
+            "motor_trim_scale": [1.0, 1.0, 1.0, 1.0],
+            "gain_multipliers": {"pos_kp": 1.0, "pos_kd": 1.0, "att_kp": 1.0, "att_kd": 1.0},
+            "safety_envelope": {"max_tilt_deg": 12.0},
+        },
+        "validation_rules": [
+            {
+                "field": "waypoint_command.target[0]",
+                "type": "range",
+                "min": 1.2,
+                "max": 2.5,
+                "desc": "Advances forward through window opening",
+            },
+            {
+                "field": "waypoint_command.target[1]",
+                "type": "abs_max",
+                "max": 0.25,
+                "desc": "Remains centered within horizontal window clearance",
+            },
+            {
+                "field": "waypoint_command.target[2]",
+                "type": "abs_max",
+                "max": 0.25,
+                "desc": "Maintains 1.10m aperture center elevation",
+            },
+            {
+                "field": "safety_envelope.max_tilt_deg",
+                "type": "range",
+                "min": 10.0,
+                "max": 14.0,
+                "desc": "Tightens safety tilt envelope to ~12° for aperture passage",
+            },
+            {
+                "field": "flight_phase",
+                "type": "exact",
+                "value": "APERTURE_INGRESS",
+                "desc": "Aperture ingress traversal flight phase",
+            },
+            {
+                "field": "feedforward_force_offset",
+                "type": "zero_vector",
+                "desc": "Zero feedforward during aperture flight",
+            },
+        ],
+    })
+
+    # ==========================================================================
+    # SD-12: Right Arch Sector Scan (Unobservable Sector Saccade -90°)
+    # Drone at (0.0, 0.0, 1.0), heading 000°, arch is at -90° flank
+    # ==========================================================================
+    data.qpos[0:3] = [0.0, 0.0, 1.0]
+    data.qpos[3:7] = [1.0, 0.0, 0.0, 0.0]
+    mujoco.mj_forward(model, data)
+    renderer.update_scene(data, camera="fpv")
+    img12 = add_hud(
+        Image.fromarray(renderer.render()),
+        top_text="FPV: fpv | ALT: 1.00m | HDG: 000° | MISSION: RIGHT ARCH INGRESS",
+        bottom_text="TARGET IN SECTOR_RIGHT (-90°) UNOBSERVABLE | EXECUTE ACTIVE IN-PLACE YAW SACCADE",
+        reticle_color=(255, 140, 0),
+    )
+    p12 = OUTPUT_DIR / "sd_12_right_arch_sector_scan.jpg"
+    img12.save(p12, format="JPEG", quality=85)
+
+    test_cases.append({
+        "id": "SD-12",
+        "name": "Right Arch Sector Scan (Unobservable Sector Saccade -90°)",
+        "category": "Active Perception Saccade",
+        "image_path": str(p12),
+        "instruction": "Objective is Right Arch located at Y=-5.0m in Sector Right. Current heading is 000° (arch unobservable). Perform an active perception in-place yaw saccade to face Sector Right (-90°).",
+        "telemetry": {
+            "altitude_m": 1.00,
+            "velocity_body_mps": [0.00, 0.00, 0.00],
+            "attitude_deg": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
+            "unmodeled_force_disturbance_N": [0.0, 0.0, 0.0],
+            "motor_controls_N": [3.25, 3.25, 3.25, 3.25],
+            "gyro_rms_radps": [0.08, 0.08, 0.06],
+        },
+        "ground_truth": {
+            "diagnosis": "Right Arch in unobservable Sector Right (-90°); executing active in-place yaw saccade",
+            "flight_phase": "SECTOR_SCAN",
+            "waypoint_command": {
+                "mode": "relative_body",
+                "target": [0.0, 0.0, 0.0],
+                "yaw_deg": -90.0,
+                "max_velocity": 0.5,
+                "corridor_width": 0.6,
+            },
+            "feedforward_force_offset": [0.0, 0.0, 0.0],
+            "motor_trim_scale": [1.0, 1.0, 1.0, 1.0],
+            "gain_multipliers": {"pos_kp": 1.0, "pos_kd": 1.0, "att_kp": 1.0, "att_kd": 1.0},
+            "safety_envelope": {"max_tilt_deg": 20.0},
+        },
+        "validation_rules": [
+            {
+                "field": "waypoint_command.yaw_deg",
+                "type": "range",
+                "min": -95.0,
+                "max": -75.0,
+                "desc": "Commands ~-90° yaw rotation to acquire Right Arch",
+            },
+            {
+                "field": "waypoint_command.target[0]",
+                "type": "abs_max",
+                "max": 0.5,
+                "desc": "Rotates in-place with zero forward translation",
+            },
+            {
+                "field": "waypoint_command.target[1]",
+                "type": "abs_max",
+                "max": 0.5,
+                "desc": "Rotates in-place with zero lateral translation",
+            },
+            {
+                "field": "flight_phase",
+                "type": "exact",
+                "value": "SECTOR_SCAN",
+                "desc": "Sector scan active perception phase",
+            },
+            {
+                "field": "feedforward_force_offset",
+                "type": "zero_vector",
+                "desc": "Zero feedforward during unforced yaw turn",
+            },
+            {
+                "field": "motor_trim_scale",
+                "type": "ones_vector",
+                "desc": "Nominal motor trims",
+            },
+        ],
+    })
+
+    # ==========================================================================
+    # SD-13: Right Arch Aperture Ingress (Traversing Arch at Z=0.90m)
+    # Drone at (0.0, -3.2, 0.90), yaw = -90° looking directly at arch opening at y=-5.0m
+    # ==========================================================================
+    yaw13 = np.radians(-90)
+    data.qpos[0:3] = [0.0, -3.2, 0.90]
+    data.qpos[3:7] = [np.cos(yaw13 / 2), 0.0, 0.0, np.sin(yaw13 / 2)]
+    mujoco.mj_forward(model, data)
+    cam13 = hud_projector.get_camera_extrinsics(model, data)
+    renderer.update_scene(data, camera="fpv")
+    base_img13 = Image.fromarray(renderer.render())
+    img13 = hud_projector.overlay_hud(
+        base_img13,
+        cam13,
+        drone_pos=np.array([0.0, -3.2, 0.90]),
+        apertures=[ARENA_APERTURES[1]],
+        mode_str="APERTURE INGRESS: RIGHT ARCH",
+    )
+    p13 = OUTPUT_DIR / "sd_13_right_arch_aperture_ingress.jpg"
+    img13.save(p13, format="JPEG", quality=85)
+
+    test_cases.append({
+        "id": "SD-13",
+        "name": "Right Arch Aperture Ingress",
+        "category": "Aperture Traversal",
+        "image_path": str(p13),
+        "instruction": "Traverse forward through the Right Arch aperture opening at Z=0.90m. Maintain tight attitude safety tilt envelope (max 12.0°) and approach velocity (0.6 m/s) to pass safely within the inner clearance frame.",
+        "telemetry": {
+            "altitude_m": 0.90,
+            "velocity_body_mps": [0.04, 0.00, 0.00],
+            "attitude_deg": {"roll": 0.0, "pitch": 0.0, "yaw": -90.0},
+            "unmodeled_force_disturbance_N": [0.0, 0.0, 0.0],
+            "motor_controls_N": [3.25, 3.25, 3.25, 3.25],
+            "gyro_rms_radps": [0.08, 0.09, 0.07],
+        },
+        "ground_truth": {
+            "diagnosis": "Aligned with Right Arch aperture center; traversing through opening with tightened 12° tilt clamp",
+            "flight_phase": "APERTURE_INGRESS",
+            "waypoint_command": {
+                "mode": "relative_body",
+                "target": [1.8, 0.0, 0.0],
+                "yaw_deg": 0.0,
+                "max_velocity": 0.6,
+                "corridor_width": 0.4,
+            },
+            "feedforward_force_offset": [0.0, 0.0, 0.0],
+            "motor_trim_scale": [1.0, 1.0, 1.0, 1.0],
+            "gain_multipliers": {"pos_kp": 1.0, "pos_kd": 1.0, "att_kp": 1.0, "att_kd": 1.0},
+            "safety_envelope": {"max_tilt_deg": 12.0},
+        },
+        "validation_rules": [
+            {
+                "field": "waypoint_command.target[0]",
+                "type": "range",
+                "min": 1.2,
+                "max": 2.5,
+                "desc": "Advances forward through arch opening",
+            },
+            {
+                "field": "waypoint_command.target[1]",
+                "type": "abs_max",
+                "max": 0.25,
+                "desc": "Remains centered within arch lateral opening",
+            },
+            {
+                "field": "waypoint_command.target[2]",
+                "type": "abs_max",
+                "max": 0.25,
+                "desc": "Maintains 0.90m arch center elevation",
+            },
+            {
+                "field": "safety_envelope.max_tilt_deg",
+                "type": "range",
+                "min": 10.0,
+                "max": 14.0,
+                "desc": "Tightens safety tilt envelope to ~12° for arch passage",
+            },
+            {
+                "field": "flight_phase",
+                "type": "exact",
+                "value": "APERTURE_INGRESS",
+                "desc": "Aperture ingress traversal flight phase",
+            },
+            {
+                "field": "feedforward_force_offset",
+                "type": "zero_vector",
+                "desc": "Zero feedforward during aperture flight",
+            },
+        ],
+    })
+
+    # ==========================================================================
+    # SD-14: Delta: Platform Station-Keeping under Crosswind
+    # Drone at (8.0, 0.0, 1.10) atop Delta disc, +4.8N crosswind along +Y
+    # Roll tilt ~ -12 deg banked into crosswind
+    # ==========================================================================
+    roll14 = np.radians(-12)
+    data.qpos[0:3] = [8.0, 0.0, 1.10]
+    data.qpos[3:7] = [np.cos(roll14 / 2), np.sin(roll14 / 2), 0.0, 0.0]
+    mujoco.mj_forward(model, data)
+    renderer.update_scene(data, camera="fpv")
+    img14 = add_hud(
+        Image.fromarray(renderer.render()),
+        top_text="FPV: fpv | ALT: 1.10m | ROLL: -12.0° | CROSSWIND DISTURBANCE",
+        bottom_text="CROSSWIND +4.8N (+Y) | COUNTER-THRUST FEEDFORWARD: dFy = -4.8N",
+        reticle_color=(255, 140, 0),
+    )
+    p14 = OUTPUT_DIR / "sd_14_platform_delta_crosswind_hover.jpg"
+    img14.save(p14, format="JPEG", quality=85)
+
+    test_cases.append({
+        "id": "SD-14",
+        "name": "Delta: Platform Station-Keeping under Crosswind",
+        "category": "Disturbance Rejection",
+        "image_path": str(p14),
+        "instruction": "Maintain station-keeping hover atop Elevated Station Delta against a strong lateral crosswind disturbance (+4.8N along +Y). Inject opposing feedforward force to prevent drifting off the raised platform.",
+        "telemetry": {
+            "altitude_m": 1.10,
+            "velocity_body_mps": [0.00, 0.02, 0.00],
+            "attitude_deg": {"roll": -12.0, "pitch": 0.0, "yaw": 0.0},
+            "unmodeled_force_disturbance_N": [0.00, 4.80, 0.00],
+            "motor_controls_N": [3.60, 3.60, 2.90, 2.90],
+            "gyro_rms_radps": [0.16, 0.14, 0.10],
+        },
+        "ground_truth": {
+            "diagnosis": "Strong lateral crosswind disturbance (+4.8N along +Y) atop Elevated Pedestal Delta; injecting opposing feedforward",
+            "flight_phase": "HOVER_HOLD",
+            "waypoint_command": {
+                "mode": "relative_body",
+                "target": [0.0, 0.0, 0.0],
+                "yaw_deg": 0.0,
+                "max_velocity": 0.5,
+                "corridor_width": 0.4,
+            },
+            "feedforward_force_offset": [0.0, -4.8, 0.0],
+            "motor_trim_scale": [1.0, 1.0, 1.0, 1.0],
+            "gain_multipliers": {"pos_kp": 1.2, "pos_kd": 1.0, "att_kp": 1.0, "att_kd": 1.0},
+            "safety_envelope": {"max_tilt_deg": 25.0},
+        },
+        "validation_rules": [
+            {
+                "field": "feedforward_force_offset[1]",
+                "type": "range",
+                "min": -5.5,
+                "max": -4.2,
+                "desc": "Injects opposing lateral feedforward force dFy in [-5.5, -4.2] N to cancel +4.8N crosswind",
+            },
+            {
+                "field": "feedforward_force_offset[0]",
+                "type": "abs_max",
+                "max": 0.3,
+                "desc": "Zero forward feedforward force",
+            },
+            {
+                "field": "waypoint_command.target[0]",
+                "type": "abs_max",
+                "max": 0.5,
+                "desc": "Holds station hover rather than forward drift",
+            },
+            {
+                "field": "waypoint_command.target[1]",
+                "type": "abs_max",
+                "max": 0.5,
+                "desc": "Holds lateral station against crosswind",
+            },
+            {
+                "field": "motor_trim_scale",
+                "type": "ones_vector",
+                "desc": "Nominal motor trims during wind disturbance",
+            },
+            {
+                "field": "flight_phase",
+                "type": "in_set",
+                "values": ["HOVER_HOLD", "CORRIDOR_APPROACH"],
+                "desc": "Hover hold flight phase under crosswind",
             },
         ],
     })

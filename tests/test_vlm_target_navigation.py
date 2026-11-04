@@ -142,8 +142,8 @@ class TestSingleDroneTestSuiteGroundTruth(unittest.TestCase):
         with open(self.SUITE_PATH) as f:
             self.test_cases = json.load(f)
 
-    def test_suite_contains_all_seven_scenarios(self):
-        expected_ids = {"SD-01", "SD-02", "SD-03", "SD-04", "SD-05", "SD-06", "SD-07"}
+    def test_suite_contains_all_scenarios(self):
+        expected_ids = {f"SD-{i:02d}" for i in range(1, 15)}
         actual_ids = {tc["id"] for tc in self.test_cases}
         self.assertEqual(expected_ids, actual_ids, f"Suite missing expected scenario IDs: {expected_ids - actual_ids}")
 

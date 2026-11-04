@@ -36,6 +36,7 @@
     },
     "ground_truth": {
       "diagnosis": "Nominal flight aligned with Target Pad Alpha along forward corridor",
+      "flight_phase": "CORRIDOR_APPROACH",
       "waypoint_command": {
         "mode": "relative_body",
         "target": [
@@ -97,15 +98,24 @@
         "field": "motor_trim_scale",
         "type": "ones_vector",
         "desc": "Nominal motor trims during unperturbed flight"
+      },
+      {
+        "field": "flight_phase",
+        "type": "in_set",
+        "values": [
+          "CORRIDOR_APPROACH",
+          "HOVER_HOLD"
+        ],
+        "desc": "Corridor approach flight phase toward forward target"
       }
     ]
   },
   {
     "id": "SD-02",
-    "name": "Elevated Pedestal Delta Hover Acquisition",
+    "name": "Delta: Navigate to Raised Disc Platform",
     "category": "Elevated Target Acquisition",
     "image_path": "vlm/test_cases_single/sd_02_elevated_pedestal_delta.jpg",
-    "instruction": "Approach Elevated Pedestal Delta and command hover waypoint directly over the platform disc (clearance 0.35m above platform top).",
+    "instruction": "Navigate forward onto Elevated Station Delta and command hover waypoint directly over the platform disc (clearance 0.35m above platform top).",
     "telemetry": {
       "altitude_m": 1.05,
       "velocity_body_mps": [
@@ -137,6 +147,7 @@
     },
     "ground_truth": {
       "diagnosis": "Approaching Elevated Pedestal Delta platform, commanding elevated target hover",
+      "flight_phase": "CORRIDOR_APPROACH",
       "waypoint_command": {
         "mode": "relative_body",
         "target": [
@@ -199,6 +210,15 @@
         "field": "motor_trim_scale",
         "type": "ones_vector",
         "desc": "Nominal motor trims during platform acquisition"
+      },
+      {
+        "field": "flight_phase",
+        "type": "in_set",
+        "values": [
+          "CORRIDOR_APPROACH",
+          "HOVER_HOLD"
+        ],
+        "desc": "Corridor approach to elevated pedestal platform"
       }
     ]
   },
@@ -239,6 +259,7 @@
     },
     "ground_truth": {
       "diagnosis": "Visual acquisition of cyan Target Pad Bravo, vectoring forward-left",
+      "flight_phase": "CORRIDOR_APPROACH",
       "waypoint_command": {
         "mode": "relative_body",
         "target": [
@@ -342,6 +363,7 @@
     },
     "ground_truth": {
       "diagnosis": "Visual acquisition of emerald Target Pad Charlie, vectoring forward-right",
+      "flight_phase": "CORRIDOR_APPROACH",
       "waypoint_command": {
         "mode": "relative_body",
         "target": [
@@ -445,6 +467,7 @@
     },
     "ground_truth": {
       "diagnosis": "Approaching pylon gate obstacle; maintaining centered lane through passage",
+      "flight_phase": "CORRIDOR_APPROACH",
       "waypoint_command": {
         "mode": "relative_body",
         "target": [
@@ -547,6 +570,7 @@
     },
     "ground_truth": {
       "diagnosis": "Persistent headwind disturbance (+5.2N along +X); injecting opposing feedforward",
+      "flight_phase": "HOVER_HOLD",
       "waypoint_command": {
         "mode": "relative_body",
         "target": [
@@ -643,6 +667,7 @@
     },
     "ground_truth": {
       "diagnosis": "Motor 1 severely degraded at 40% efficiency; applying 2.50x motor trim scale",
+      "flight_phase": "HOVER_HOLD",
       "waypoint_command": {
         "mode": "relative_body",
         "target": [
@@ -715,6 +740,774 @@
         "min": 15.0,
         "max": 20.0,
         "desc": "Tightens maximum allowable tilt envelope during degraded actuator flight"
+      }
+    ]
+  },
+  {
+    "id": "SD-08",
+    "name": "Alpha: Precision Hover Between 2 Runway Poles",
+    "category": "Runway Corridor Station-Keeping",
+    "image_path": "vlm/test_cases_single/sd_08_hover_between_runway_poles.jpg",
+    "instruction": "Hold precision station-keeping hover centered between the two runway poles (pylons at Y=\u00b10.9m) framing Pad Alpha. Maintain 1.0m altitude, keep zero lateral drift (stay equidistant between poles at dy=0.0m), and hold station.",
+    "telemetry": {
+      "altitude_m": 1.0,
+      "velocity_body_mps": [
+        0.01,
+        0.0,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "gyro_rms_radps": [
+        0.08,
+        0.09,
+        0.06
+      ]
+    },
+    "ground_truth": {
+      "diagnosis": "Holding precision station-keeping hover centered between the runway poles framing Pad Alpha",
+      "flight_phase": "HOVER_HOLD",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "yaw_deg": 0.0,
+        "max_velocity": 0.5,
+        "corridor_width": 0.4
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 20.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "abs_max",
+        "max": 0.4,
+        "desc": "Maintains station-keeping hover hold between runway poles"
+      },
+      {
+        "field": "waypoint_command.target[1]",
+        "type": "abs_max",
+        "max": 0.25,
+        "desc": "Strict lateral centering equidistant between both runway poles"
+      },
+      {
+        "field": "waypoint_command.target[2]",
+        "type": "abs_max",
+        "max": 0.25,
+        "desc": "Maintains 1.0m hover altitude"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "Zero feedforward force during calm station-keeping"
+      },
+      {
+        "field": "motor_trim_scale",
+        "type": "ones_vector",
+        "desc": "Nominal motor trims"
+      },
+      {
+        "field": "flight_phase",
+        "type": "in_set",
+        "values": [
+          "HOVER_HOLD",
+          "CORRIDOR_APPROACH"
+        ],
+        "desc": "Station-keeping hover hold between poles"
+      }
+    ]
+  },
+  {
+    "id": "SD-09",
+    "name": "Delta: Precision Station-Keeping Atop Raised Disc Platform",
+    "category": "Elevated Platform Station-Keeping",
+    "image_path": "vlm/test_cases_single/sd_09_hover_atop_raised_disc_platform.jpg",
+    "instruction": "Maintain precision station-keeping hover directly atop Elevated Pedestal Delta (centered over the yellow caution disc). Hold 1.10m altitude (0.40m clearance above platform disc) and zero horizontal drift.",
+    "telemetry": {
+      "altitude_m": 1.1,
+      "velocity_body_mps": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "gyro_rms_radps": [
+        0.07,
+        0.08,
+        0.06
+      ]
+    },
+    "ground_truth": {
+      "diagnosis": "Holding precision station-keeping hover directly atop Elevated Pedestal Delta yellow disc",
+      "flight_phase": "HOVER_HOLD",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "yaw_deg": 0.0,
+        "max_velocity": 0.5,
+        "corridor_width": 0.4
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 18.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "abs_max",
+        "max": 0.4,
+        "desc": "Maintains station hover over Elevated Pedestal Delta disc"
+      },
+      {
+        "field": "waypoint_command.target[1]",
+        "type": "abs_max",
+        "max": 0.3,
+        "desc": "Centered laterally over pedestal disc"
+      },
+      {
+        "field": "waypoint_command.target[2]",
+        "type": "abs_max",
+        "max": 0.25,
+        "desc": "Maintains elevated hover clearance above platform disc"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "Zero feedforward during calm elevated hover"
+      },
+      {
+        "field": "motor_trim_scale",
+        "type": "ones_vector",
+        "desc": "Nominal motor trims"
+      },
+      {
+        "field": "flight_phase",
+        "type": "in_set",
+        "values": [
+          "HOVER_HOLD",
+          "CORRIDOR_APPROACH"
+        ],
+        "desc": "Hover hold flight phase atop elevated pedestal disc"
+      }
+    ]
+  },
+  {
+    "id": "SD-10",
+    "name": "Left Window Sector Scan (Unobservable Sector Saccade +90\u00b0)",
+    "category": "Active Perception Saccade",
+    "image_path": "vlm/test_cases_single/sd_10_left_window_sector_scan.jpg",
+    "instruction": "Objective is Left Window located at Y=+5.0m in Sector Left. Current heading is 000\u00b0 (window unobservable). Perform an active perception in-place yaw saccade to face Sector Left (+90\u00b0).",
+    "telemetry": {
+      "altitude_m": 1.0,
+      "velocity_body_mps": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "gyro_rms_radps": [
+        0.08,
+        0.08,
+        0.06
+      ]
+    },
+    "ground_truth": {
+      "diagnosis": "Left Window in unobservable Sector Left (+90\u00b0); executing active in-place yaw saccade",
+      "flight_phase": "SECTOR_SCAN",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "yaw_deg": 90.0,
+        "max_velocity": 0.5,
+        "corridor_width": 0.6
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 20.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.yaw_deg",
+        "type": "range",
+        "min": 75.0,
+        "max": 95.0,
+        "desc": "Commands ~+90\u00b0 yaw rotation to acquire Left Window"
+      },
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "abs_max",
+        "max": 0.5,
+        "desc": "Rotates in-place with zero forward translation"
+      },
+      {
+        "field": "waypoint_command.target[1]",
+        "type": "abs_max",
+        "max": 0.5,
+        "desc": "Rotates in-place with zero lateral translation"
+      },
+      {
+        "field": "flight_phase",
+        "type": "exact",
+        "value": "SECTOR_SCAN",
+        "desc": "Sector scan active perception phase"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "Zero feedforward during unforced yaw turn"
+      },
+      {
+        "field": "motor_trim_scale",
+        "type": "ones_vector",
+        "desc": "Nominal motor trims"
+      }
+    ]
+  },
+  {
+    "id": "SD-11",
+    "name": "Left Window Aperture Ingress",
+    "category": "Aperture Traversal",
+    "image_path": "vlm/test_cases_single/sd_11_left_window_aperture_ingress.jpg",
+    "instruction": "Traverse forward through the Left Window aperture opening at Z=1.10m. Maintain tight attitude safety tilt envelope (max 12.0\u00b0) and approach velocity (0.6 m/s) to pass safely within the inner clearance frame.",
+    "telemetry": {
+      "altitude_m": 1.1,
+      "velocity_body_mps": [
+        0.04,
+        0.0,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 90.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "gyro_rms_radps": [
+        0.08,
+        0.09,
+        0.07
+      ]
+    },
+    "ground_truth": {
+      "diagnosis": "Aligned with Left Window aperture center; traversing through opening with tightened 12\u00b0 tilt clamp",
+      "flight_phase": "APERTURE_INGRESS",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          1.8,
+          0.0,
+          0.0
+        ],
+        "yaw_deg": 0.0,
+        "max_velocity": 0.6,
+        "corridor_width": 0.4
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 12.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "range",
+        "min": 1.2,
+        "max": 2.5,
+        "desc": "Advances forward through window opening"
+      },
+      {
+        "field": "waypoint_command.target[1]",
+        "type": "abs_max",
+        "max": 0.25,
+        "desc": "Remains centered within horizontal window clearance"
+      },
+      {
+        "field": "waypoint_command.target[2]",
+        "type": "abs_max",
+        "max": 0.25,
+        "desc": "Maintains 1.10m aperture center elevation"
+      },
+      {
+        "field": "safety_envelope.max_tilt_deg",
+        "type": "range",
+        "min": 10.0,
+        "max": 14.0,
+        "desc": "Tightens safety tilt envelope to ~12\u00b0 for aperture passage"
+      },
+      {
+        "field": "flight_phase",
+        "type": "exact",
+        "value": "APERTURE_INGRESS",
+        "desc": "Aperture ingress traversal flight phase"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "Zero feedforward during aperture flight"
+      }
+    ]
+  },
+  {
+    "id": "SD-12",
+    "name": "Right Arch Sector Scan (Unobservable Sector Saccade -90\u00b0)",
+    "category": "Active Perception Saccade",
+    "image_path": "vlm/test_cases_single/sd_12_right_arch_sector_scan.jpg",
+    "instruction": "Objective is Right Arch located at Y=-5.0m in Sector Right. Current heading is 000\u00b0 (arch unobservable). Perform an active perception in-place yaw saccade to face Sector Right (-90\u00b0).",
+    "telemetry": {
+      "altitude_m": 1.0,
+      "velocity_body_mps": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "gyro_rms_radps": [
+        0.08,
+        0.08,
+        0.06
+      ]
+    },
+    "ground_truth": {
+      "diagnosis": "Right Arch in unobservable Sector Right (-90\u00b0); executing active in-place yaw saccade",
+      "flight_phase": "SECTOR_SCAN",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "yaw_deg": -90.0,
+        "max_velocity": 0.5,
+        "corridor_width": 0.6
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 20.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.yaw_deg",
+        "type": "range",
+        "min": -95.0,
+        "max": -75.0,
+        "desc": "Commands ~-90\u00b0 yaw rotation to acquire Right Arch"
+      },
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "abs_max",
+        "max": 0.5,
+        "desc": "Rotates in-place with zero forward translation"
+      },
+      {
+        "field": "waypoint_command.target[1]",
+        "type": "abs_max",
+        "max": 0.5,
+        "desc": "Rotates in-place with zero lateral translation"
+      },
+      {
+        "field": "flight_phase",
+        "type": "exact",
+        "value": "SECTOR_SCAN",
+        "desc": "Sector scan active perception phase"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "Zero feedforward during unforced yaw turn"
+      },
+      {
+        "field": "motor_trim_scale",
+        "type": "ones_vector",
+        "desc": "Nominal motor trims"
+      }
+    ]
+  },
+  {
+    "id": "SD-13",
+    "name": "Right Arch Aperture Ingress",
+    "category": "Aperture Traversal",
+    "image_path": "vlm/test_cases_single/sd_13_right_arch_aperture_ingress.jpg",
+    "instruction": "Traverse forward through the Right Arch aperture opening at Z=0.90m. Maintain tight attitude safety tilt envelope (max 12.0\u00b0) and approach velocity (0.6 m/s) to pass safely within the inner clearance frame.",
+    "telemetry": {
+      "altitude_m": 0.9,
+      "velocity_body_mps": [
+        0.04,
+        0.0,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": -90.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.25,
+        3.25,
+        3.25,
+        3.25
+      ],
+      "gyro_rms_radps": [
+        0.08,
+        0.09,
+        0.07
+      ]
+    },
+    "ground_truth": {
+      "diagnosis": "Aligned with Right Arch aperture center; traversing through opening with tightened 12\u00b0 tilt clamp",
+      "flight_phase": "APERTURE_INGRESS",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          1.8,
+          0.0,
+          0.0
+        ],
+        "yaw_deg": 0.0,
+        "max_velocity": 0.6,
+        "corridor_width": 0.4
+      },
+      "feedforward_force_offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.0,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 12.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "range",
+        "min": 1.2,
+        "max": 2.5,
+        "desc": "Advances forward through arch opening"
+      },
+      {
+        "field": "waypoint_command.target[1]",
+        "type": "abs_max",
+        "max": 0.25,
+        "desc": "Remains centered within arch lateral opening"
+      },
+      {
+        "field": "waypoint_command.target[2]",
+        "type": "abs_max",
+        "max": 0.25,
+        "desc": "Maintains 0.90m arch center elevation"
+      },
+      {
+        "field": "safety_envelope.max_tilt_deg",
+        "type": "range",
+        "min": 10.0,
+        "max": 14.0,
+        "desc": "Tightens safety tilt envelope to ~12\u00b0 for arch passage"
+      },
+      {
+        "field": "flight_phase",
+        "type": "exact",
+        "value": "APERTURE_INGRESS",
+        "desc": "Aperture ingress traversal flight phase"
+      },
+      {
+        "field": "feedforward_force_offset",
+        "type": "zero_vector",
+        "desc": "Zero feedforward during aperture flight"
+      }
+    ]
+  },
+  {
+    "id": "SD-14",
+    "name": "Delta: Platform Station-Keeping under Crosswind",
+    "category": "Disturbance Rejection",
+    "image_path": "vlm/test_cases_single/sd_14_platform_delta_crosswind_hover.jpg",
+    "instruction": "Maintain station-keeping hover atop Elevated Station Delta against a strong lateral crosswind disturbance (+4.8N along +Y). Inject opposing feedforward force to prevent drifting off the raised platform.",
+    "telemetry": {
+      "altitude_m": 1.1,
+      "velocity_body_mps": [
+        0.0,
+        0.02,
+        0.0
+      ],
+      "attitude_deg": {
+        "roll": -12.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      },
+      "unmodeled_force_disturbance_N": [
+        0.0,
+        4.8,
+        0.0
+      ],
+      "motor_controls_N": [
+        3.6,
+        3.6,
+        2.9,
+        2.9
+      ],
+      "gyro_rms_radps": [
+        0.16,
+        0.14,
+        0.1
+      ]
+    },
+    "ground_truth": {
+      "diagnosis": "Strong lateral crosswind disturbance (+4.8N along +Y) atop Elevated Pedestal Delta; injecting opposing feedforward",
+      "flight_phase": "HOVER_HOLD",
+      "waypoint_command": {
+        "mode": "relative_body",
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "yaw_deg": 0.0,
+        "max_velocity": 0.5,
+        "corridor_width": 0.4
+      },
+      "feedforward_force_offset": [
+        0.0,
+        -4.8,
+        0.0
+      ],
+      "motor_trim_scale": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "gain_multipliers": {
+        "pos_kp": 1.2,
+        "pos_kd": 1.0,
+        "att_kp": 1.0,
+        "att_kd": 1.0
+      },
+      "safety_envelope": {
+        "max_tilt_deg": 25.0
+      }
+    },
+    "validation_rules": [
+      {
+        "field": "feedforward_force_offset[1]",
+        "type": "range",
+        "min": -5.5,
+        "max": -4.2,
+        "desc": "Injects opposing lateral feedforward force dFy in [-5.5, -4.2] N to cancel +4.8N crosswind"
+      },
+      {
+        "field": "feedforward_force_offset[0]",
+        "type": "abs_max",
+        "max": 0.3,
+        "desc": "Zero forward feedforward force"
+      },
+      {
+        "field": "waypoint_command.target[0]",
+        "type": "abs_max",
+        "max": 0.5,
+        "desc": "Holds station hover rather than forward drift"
+      },
+      {
+        "field": "waypoint_command.target[1]",
+        "type": "abs_max",
+        "max": 0.5,
+        "desc": "Holds lateral station against crosswind"
+      },
+      {
+        "field": "motor_trim_scale",
+        "type": "ones_vector",
+        "desc": "Nominal motor trims during wind disturbance"
+      },
+      {
+        "field": "flight_phase",
+        "type": "in_set",
+        "values": [
+          "HOVER_HOLD",
+          "CORRIDOR_APPROACH"
+        ],
+        "desc": "Hover hold flight phase under crosswind"
       }
     ]
   }

@@ -167,6 +167,17 @@ def evaluate_rules(parsed: dict, rules: list) -> Tuple[bool, List[str]]:
                 passed = False
                 reasons.append(f"❌ {field}={val} expected nominal 1.0 trim ({desc})")
 
+        elif rtype == "exact":
+            if str(val).strip().upper() != str(rule["value"]).strip().upper():
+                passed = False
+                reasons.append(f"❌ {field}='{val}' does not match expected '{rule['value']}' ({desc})")
+
+        elif rtype == "in_set":
+            normalized_set = [str(x).strip().upper() for x in rule["values"]]
+            if str(val).strip().upper() not in normalized_set:
+                passed = False
+                reasons.append(f"❌ {field}='{val}' not in allowed set {rule['values']} ({desc})")
+
     return passed, reasons
 
 
@@ -266,6 +277,32 @@ def run_benchmark(
             ideal_patch = dict(tc["ground_truth"])
             raw_json_str = json.dumps(ideal_patch)
             latency_s = 0.001
+
+        elif backend in ("gemini-live", "live"):
+            target_model = model or "gemini-3.8-live"
+            try:
+                from vlm.gemini_live_client import query_gemini_live
+                patch_dict, lat_info = query_gemini_live(
+                    image_path=img_p,
+                    system_prompt=SYSTEM_PROMPT,
+                    mission_instruction=tc["instruction"],
+                    telemetry=tc["telemetry"],
+                    model=target_model,
+                )
+                raw_json_str = json.dumps(patch_dict)
+                latency_s = lat_info["total"]
+                print(f"   [Gemini Live] Handshake: {lat_info['handshake']*1000:.1f}ms | Inference: {lat_info['inference']*1000:.1f}ms")
+            except Exception as e:
+                print(f"   ❌ Call failed: {e}")
+                results.append({
+                    "id": tc_id,
+                    "name": tc_name,
+                    "pass": False,
+                    "latency": 0.0,
+                    "notes": [f"API Error: {e}"],
+                    "metrics": {},
+                })
+                continue
 
         elif backend == "gemini":
             target_model = model or "gemini-3.5-flash-lite"
