@@ -128,6 +128,7 @@ class NavigationSimulationCoordinator:
             self.mission_status: str = "idle"  # "idle" | "running" | "completed" | "aborted"
             self.mission_start_time: float = 0.0
             self.mission_elapsed_s: float = 0.0
+            self.camera_mode: str = "free"  # "free" (manual cursor rotation/orbit) | "drone_fixed" (heading-aligned TPP)
 
             # Background Worker Thread
             self._sim_thread: Optional[threading.Thread] = None
@@ -387,6 +388,30 @@ class NavigationSimulationCoordinator:
             )
             return {"status": "ok", "message": f"Crosswind gust triggered ({force:.1f}N for {duration_s:.1f}s)"}
 
+    def toggle_camera_mode(self, mode: Optional[str] = None) -> str:
+        """Toggles or sets camera view mode between 'free' and 'drone_fixed' [Cmd+F]."""
+        with self._lock:
+            if mode in ("free", "drone_fixed"):
+                self.camera_mode = mode
+            else:
+                self.camera_mode = "drone_fixed" if self.camera_mode == "free" else "free"
+            current = self.camera_mode
+
+        try:
+            t_sim = float(self.sim.data.time)
+        except Exception:
+            t_sim = 0.0
+
+        mode_title = "Free View (Cursor Orbit Enabled)" if current == "free" else "Drone Fixed View (Heading-Locked TPP)"
+        self._record_event(
+            sim_time=t_sim,
+            event_type="CAMERA_MODE_CHANGED",
+            reason=f"Viewport camera mode set to {current.upper()} [Cmd+F]",
+            diagnosis=f"Camera mode: {mode_title}",
+        )
+        print(f"🎥 [VIEWPORT CAMERA] Viewport camera mode: {current.upper()} [Cmd+F]")
+        return current
+
     def clear_all_chaos(self) -> Dict[str, Any]:
         """Clears all active failure modes back to pristine nominal flight."""
         with self._lock:
@@ -629,6 +654,7 @@ class NavigationSimulationCoordinator:
             "vlm_model": self.vlm_model,
             "vlm_call_count": getattr(self.navigator, "_vlm_call_count", 0),
             "vla_latency_ms": getattr(self.navigator, "_last_vlm_latency_ms", 242),
+            "camera_mode": self.camera_mode,
             "chaos_mode": self.chaos_mode,
             "active_presets": self.sim.chaos.get_active_preset_keys(),
             "chaos": self.sim.chaos.get_chaos_summary(),

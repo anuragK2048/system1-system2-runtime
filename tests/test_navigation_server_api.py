@@ -148,6 +148,38 @@ class TestNavigationServerAPI(unittest.TestCase):
             # Either next telemetry tick or command ack
             self.assertIn(ack["type"], ("command_ack", "telemetry"))
 
+    def test_camera_mode_toggle_api_and_telemetry(self):
+        """Verifies GET and POST /api/navigation/camera_mode and telemetry synchronization [Cmd+F]."""
+        # 1. Initial mode should be 'free' to allow cursor rotation at startup
+        res_get = self.client.get("/api/navigation/camera_mode")
+        self.assertEqual(res_get.status_code, 200)
+        self.assertEqual(res_get.json()["camera_mode"], "free")
+
+        # 2. Toggle to 'drone_fixed'
+        res_toggle1 = self.client.post("/api/navigation/camera_mode", json={"mode": "toggle"})
+        self.assertEqual(res_toggle1.status_code, 200)
+        self.assertEqual(res_toggle1.json()["camera_mode"], "drone_fixed")
+        self.assertEqual(nav_coordinator.camera_mode, "drone_fixed")
+
+        # 3. Telemetry snapshot reflects 'drone_fixed'
+        snap = nav_coordinator.get_telemetry_snapshot()
+        self.assertEqual(snap["camera_mode"], "drone_fixed")
+
+        # 4. Toggle back to 'free'
+        res_toggle2 = self.client.post("/api/navigation/camera_mode", json={"mode": "toggle"})
+        self.assertEqual(res_toggle2.status_code, 200)
+        self.assertEqual(res_toggle2.json()["camera_mode"], "free")
+        self.assertEqual(nav_coordinator.camera_mode, "free")
+
+        # 5. Explicit set to 'drone_fixed'
+        res_set = self.client.post("/api/navigation/camera_mode", json={"mode": "drone_fixed"})
+        self.assertEqual(res_set.status_code, 200)
+        self.assertEqual(res_set.json()["camera_mode"], "drone_fixed")
+
+        # Clean up back to 'free'
+        nav_coordinator.toggle_camera_mode("free")
+        self.assertEqual(nav_coordinator.camera_mode, "free")
+
 
 if __name__ == "__main__":
     unittest.main()

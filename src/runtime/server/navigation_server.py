@@ -76,6 +76,10 @@ class ChaosGustRequest(BaseModel):
     duration_s: float = Field(0.8, gt=0.0, description="Gust duration in seconds")
 
 
+class CameraModeRequest(BaseModel):
+    mode: Optional[str] = Field("toggle", description="Camera view mode: 'toggle' | 'free' | 'drone_fixed'")
+
+
 # ==============================================================================
 # WEBSOCKET CONNECTION MANAGER
 # ==============================================================================
@@ -276,6 +280,10 @@ def create_navigation_app() -> FastAPI:
                         )
                         res = nav_coordinator.execute_instruction(intent)
                         await websocket.send_text(json.dumps({"type": "instruction_ack", "data": res}))
+                    elif action in ("camera_mode", "toggle_camera_mode"):
+                        c_mode = cmd.get("mode", "toggle")
+                        res_mode = nav_coordinator.toggle_camera_mode(c_mode)
+                        await websocket.send_text(json.dumps({"type": "command_ack", "data": {"camera_mode": res_mode}}))
                 except Exception as parse_err:
                     await websocket.send_text(json.dumps({"type": "error", "message": str(parse_err)}))
         except WebSocketDisconnect:
@@ -386,6 +394,17 @@ def create_navigation_app() -> FastAPI:
                 "sensor_active": p["sensor"].is_active(),
             })
         return catalog
+
+    @app.post("/api/navigation/camera_mode")
+    def set_camera_mode_endpoint(req: CameraModeRequest = CameraModeRequest()):
+        """Toggles or sets viewport camera mode ('free' or 'drone_fixed') [Cmd+F]."""
+        new_mode = nav_coordinator.toggle_camera_mode(req.mode)
+        return {"status": "ok", "camera_mode": new_mode}
+
+    @app.get("/api/navigation/camera_mode")
+    def get_camera_mode_endpoint():
+        """Returns the active viewport camera mode."""
+        return {"camera_mode": nav_coordinator.camera_mode}
 
     @app.get("/api/navigation/telemetry")
     def telemetry_endpoint():
@@ -528,7 +547,8 @@ def main():
     print(f"📡 WebSocket:      ws://localhost:{args.port}/ws/telemetry")
     if args.gui:
         print(f"🖥️ Parallel 3D:    Native MuJoCo OpenGL 60 FPS Viewport Active")
-        print(f"   • Auto-tracking quadrotor chase camera")
+        print(f"   • Press 'Cmd+F' or 'F' to toggle Free View vs Drone Fixed View")
+        print(f"   • Free View enables unrestricted cursor rotation and arena inspection")
         print(f"   • Press '[' or ']' in 3D window to switch camera perspectives")
         print(f"   • Press '1'-'5' for Chaos Presets | '0' to Clear All")
     print("═" * 78 + "\n")
@@ -546,6 +566,14 @@ def main():
         if args.gui:
             import mujoco.viewer
 
+            # Combined key callback for native viewer
+            def on_viewer_key(keycode: int) -> None:
+                # Intercept 'F' (70) or 'f' (102) to toggle Free View vs Drone Fixed View [Cmd+F]
+                if keycode in (70, 102):
+                    nav_coordinator.toggle_camera_mode()
+                else:
+                    nav_coordinator.sim.chaos.handle_key(keycode)
+
             # Run uvicorn on daemon thread, MuJoCo Cocoa/GLFW window on macOS main thread
             server_thread = threading.Thread(target=server.run, daemon=True, name="UvicornServerThread")
             server_thread.start()
@@ -554,14 +582,20 @@ def main():
                 with mujoco.viewer.launch_passive(
                     nav_coordinator.sim.model,
                     nav_coordinator.sim.data,
-                    key_callback=nav_coordinator.sim.chaos.handle_key,
+                    key_callback=on_viewer_key,
                 ) as viewer:
-                    viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
-                    viewer.cam.trackbodyid = nav_coordinator.sim.drone_body_id
+                    # Initial camera: FREE VIEW (allows full cursor rotation right at sim start)
+                    viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+                    viewer.cam.fixedcamid = -1
+                    viewer.cam.trackbodyid = -1
+                    with nav_coordinator.sim_lock:
+                        viewer.cam.lookat = nav_coordinator.sim.data.qpos[0:3].copy()
                     viewer.cam.distance = 2.8
                     viewer.cam.elevation = -18.0
+                    viewer.cam.azimuth = 90.0
 
                     last_cam_mode = None
+                    last_app_cam_mode = nav_coordinator.camera_mode
 
                     while viewer.is_running() and not nav_coordinator.shutdown_event.is_set():
                         # Synchronize with physics step loop so viewer.sync never copies mid-step
@@ -571,10 +605,35 @@ def main():
                             drone_yaw_deg = float(np.degrees(
                                 np.arctan2(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2]**2 + q[3]**2))
                             ))
+                            current_drone_pos = nav_coordinator.sim.data.qpos[0:3].copy()
 
                             with viewer.lock():
-                                # Keep chase camera locked behind drone and rotating with heading in TPP
-                                if viewer.cam.fixedcamid == -1:
+                                cur_mode = nav_coordinator.camera_mode
+
+                                # Detect if camera mode was toggled from Web Cockpit or Hotkey
+                                if cur_mode != last_app_cam_mode:
+                                    last_app_cam_mode = cur_mode
+                                    if cur_mode == "free":
+                                        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+                                        viewer.cam.fixedcamid = -1
+                                        viewer.cam.trackbodyid = -1
+                                        viewer.cam.lookat = current_drone_pos
+                                        print("🎥 [VIEWPORT CAMERA] Free Camera View: Manual cursor rotation & orbit active [Cmd+F]")
+                                    elif cur_mode == "drone_fixed":
+                                        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+                                        viewer.cam.fixedcamid = -1
+                                        viewer.cam.trackbodyid = nav_coordinator.sim.drone_body_id
+                                        viewer.cam.azimuth = drone_yaw_deg
+                                        viewer.cam.distance = 2.8
+                                        viewer.cam.elevation = -18.0
+                                        print("🎥 [VIEWPORT CAMERA] Drone Fixed View: Locked behind drone and auto-aligning with heading [Cmd+F]")
+
+                                # Camera behavior for active mode
+                                if viewer.cam.fixedcamid != -1:
+                                    # User switched to a fixed model camera (e.g. FPV Nose mount via '[' or ']')
+                                    pass
+                                elif cur_mode == "drone_fixed":
+                                    # Locked behind drone, auto-aligns with heading
                                     viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
                                     viewer.cam.trackbodyid = nav_coordinator.sim.drone_body_id
                                     viewer.cam.azimuth = drone_yaw_deg
@@ -582,8 +641,13 @@ def main():
                                         viewer.cam.distance = 2.8
                                     if viewer.cam.elevation > -5.0 or viewer.cam.elevation < -85.0:
                                         viewer.cam.elevation = -18.0
-                                elif viewer.cam.type == mujoco.mjtCamera.mjCAMERA_TRACKING:
-                                    viewer.cam.azimuth = drone_yaw_deg
+                                elif cur_mode == "free":
+                                    # Free View: user has complete cursor rotation freedom!
+                                    # Ensure type is FREE if returned from fixed camera
+                                    if viewer.cam.type != mujoco.mjtCamera.mjCAMERA_FREE and viewer.cam.fixedcamid == -1:
+                                        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+                                        viewer.cam.trackbodyid = -1
+                                        viewer.cam.lookat = current_drone_pos
 
                                 current_cam_tuple = (int(viewer.cam.type), int(viewer.cam.fixedcamid))
                                 if current_cam_tuple != last_cam_mode:
@@ -592,6 +656,8 @@ def main():
                                         print("🎥 [VIEWPORT CAMERA] First-Person Cockpit View (FPV Nose Mount)")
                                     elif viewer.cam.fixedcamid == 0:
                                         print("🎥 [VIEWPORT CAMERA] Fixed Third-Person Chase Camera (Attached to Drone Frame)")
+                                    elif cur_mode == "free":
+                                        print("🎥 [VIEWPORT CAMERA] Free Camera View (Manual Orbit & Cursor Rotation Enabled) [Cmd+F]")
                                     else:
                                         print("🎥 [VIEWPORT CAMERA] Dynamic Third-Person Chase Camera (Auto-Aligning with Heading)")
 

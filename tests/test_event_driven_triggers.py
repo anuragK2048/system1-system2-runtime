@@ -76,6 +76,8 @@ class TestEventDrivenTriggersAndGuidance(unittest.TestCase):
         self.assertIn("max_tilt_clamp", snap)
         self.assertIn("phase", snap)
         self.assertIn("vla_latency_ms", snap)
+        self.assertIn("camera_mode", snap)
+        self.assertEqual(snap["camera_mode"], "free")
 
         # Confirm Meta Llama 3.2 Vision branding
         self.assertIn("Llama-3.2", snap["vlm_model"])
@@ -103,6 +105,8 @@ class TestEventDrivenTriggersAndGuidance(unittest.TestCase):
         self.assertIn("Visual Navigation Target", content)
         self.assertIn("META LLAMA 3.2 VISION ON MODAL GPU", content)
         self.assertIn("grid-template-columns: repeat(3, 1fr)", content)
+        self.assertIn("btn-toggle-cam", content)
+        self.assertIn("FREE VIEW [Cmd+F]", content)
 
     def test_vla_latency_dynamic_recalculation_range(self):
         """Verifies VLA latency is dynamically recalculated within 400-700ms on every patch creation."""

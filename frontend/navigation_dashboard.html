@@ -1051,7 +1051,7 @@
           </div>
 
           <!-- Controls Bar -->
-          <div class="controls-bar">
+          <div class="controls-bar" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
             <button class="btn btn-primary" id="btn-launch" onclick="launchActiveMission()">
               <span>▶</span> LAUNCH MISSION
             </button>
@@ -1060,6 +1060,10 @@
             </button>
             <button class="btn btn-secondary" id="btn-reset" onclick="resetDrone()">
               <span>↺</span> RESET ORIGIN
+            </button>
+            <button class="btn btn-secondary" id="btn-toggle-cam" onclick="toggleCameraMode()" style="border-color: rgba(0, 229, 255, 0.4); color: var(--cyan-bright); font-weight: 600; display: inline-flex; align-items: center; gap: 6px;" title="Toggle Viewport Camera Mode (Cmd+F / F): Free View (Manual Cursor Rotation) vs Drone Fixed View (Heading Aligned)">
+              <span id="cam-toggle-icon">🌐</span>
+              <span id="cam-toggle-label">FREE VIEW [Cmd+F]</span>
             </button>
           </div>
         </div>
@@ -1371,6 +1375,9 @@
       document.getElementById("patch-tilt-clamp").innerText = `${data.max_tilt_clamp.toFixed(1)}°`;
       document.getElementById("patch-phase-name").innerText = data.phase;
       document.getElementById("vlm-call-counter").innerText = `VLA LATENCY: ${data.vla_latency_ms || 240}ms (MODAL A100)`;
+      if (data.camera_mode && data.camera_mode !== currentCameraMode) {
+        updateCameraModeUI(data.camera_mode);
+      }
 
       // Update Event Feed from real-time WebSocket push (no polling needed)
       if (data.events && Array.isArray(data.events)) {
@@ -1521,6 +1528,70 @@
       clearRadarTrail();
       fetch("/api/navigation/reset", { method: "POST" });
     }
+
+    // Viewport Camera Mode Toggle (Free View vs Drone Fixed) [Cmd+F]
+    let currentCameraMode = "free";
+
+    async function toggleCameraMode(targetMode = null) {
+      try {
+        const payload = targetMode ? { mode: targetMode } : { mode: "toggle" };
+        const resp = await fetch("/api/navigation/camera_mode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const res = await resp.json();
+        if (res && res.camera_mode) {
+          updateCameraModeUI(res.camera_mode);
+        }
+      } catch (err) {
+        console.error("Camera mode toggle error:", err);
+      }
+    }
+
+    function updateCameraModeUI(mode) {
+      if (!mode) return;
+      currentCameraMode = mode;
+      const btn = document.getElementById("btn-toggle-cam");
+      const icon = document.getElementById("cam-toggle-icon");
+      const label = document.getElementById("cam-toggle-label");
+      if (!btn) return;
+
+      if (mode === "free") {
+        btn.style.borderColor = "rgba(0, 229, 255, 0.4)";
+        btn.style.color = "var(--cyan-bright)";
+        if (icon) icon.innerText = "🌐";
+        if (label) label.innerText = "FREE VIEW [Cmd+F]";
+        btn.title = "Current: FREE VIEW (Manual cursor rotation & orbit active). Press Cmd+F or click to lock to Drone Heading.";
+      } else {
+        btn.style.borderColor = "rgba(181, 108, 255, 0.5)";
+        btn.style.color = "var(--purple-bright)";
+        if (icon) icon.innerText = "🚁";
+        if (label) label.innerText = "DRONE FIXED [Cmd+F]";
+        btn.title = "Current: DRONE FIXED (Locked behind drone and auto-aligning with heading). Press Cmd+F or click for Free cursor rotation.";
+      }
+    }
+
+    // Global Hotkey Listener: Cmd+F or 'F' to toggle camera view
+    window.addEventListener("keydown", (e) => {
+      const isInput = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
+      if ((e.metaKey || e.ctrlKey) && (e.key === "f" || e.key === "F")) {
+        if (!isInput) {
+          e.preventDefault();
+          toggleCameraMode();
+        }
+      } else if (!isInput && (e.key === "f" || e.key === "F")) {
+        toggleCameraMode();
+      }
+    });
+
+    // Initialize camera mode UI state on load
+    fetch("/api/navigation/camera_mode")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d && d.camera_mode) updateCameraModeUI(d.camera_mode);
+      })
+      .catch(() => {});
 
     // 2D Tactical Arena Radar Renderer
     function renderArenaRadar(data) {
