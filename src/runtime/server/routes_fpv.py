@@ -18,6 +18,8 @@ Rendering notes:
 
 import asyncio
 import io
+import pathlib
+import subprocess
 import threading
 import time
 from typing import AsyncIterator, Optional
@@ -45,30 +47,29 @@ CAMERAS = {
 THIRD_PERSON_CAMERA = "arena_3rd"
 VIEWS = ("fpv", "third")
 
-_renderers: dict = {}  # (model id, camera_name) -> mujoco.Renderer
+_renderer: Optional[mujoco.Renderer] = None
+_renderer_model: Optional[mujoco.MjModel] = None
+_renderer_camera: Optional[str] = None
 _render_lock = threading.Lock()
 _render_data: Optional[mujoco.MjData] = None
 _render_data_model: Optional[mujoco.MjModel] = None   # <-- add this line
+_stream_generation = 0
 
 def _get_renderer(model: mujoco.MjModel, camera_name: str) -> mujoco.Renderer:
-    """Returns a renderer for this model+camera, creating it if needed.
-    Each camera gets its own renderer because switching cameras on a
-    shared renderer corrupts its internal scene state (causes wobble)."""
-    key = (id(model), camera_name)
-    renderer = _renderers.get(key)
-    if renderer is None:
-        # Drop renderers for old models to avoid leaking GL contexts
-        for k in [k for k in _renderers if k[0] != id(model)]:
+    """Single shared renderer, recreated when model or camera changes.
+    (Multiple simultaneous renderers exhaust GL contexts on Windows;
+    but reusing one across cameras corrupts its scene state.)"""
+    global _renderer, _renderer_model, _renderer_camera
+    if _renderer is None or _renderer_model is not model or _renderer_camera != camera_name:
+        if _renderer is not None:
             try:
-                _renderers[k].close()
+                _renderer.close()
             except Exception:
                 pass
-            del _renderers[k]
-        renderer = mujoco.Renderer(model, height=FRAME_HEIGHT, width=FRAME_WIDTH)
-        _renderers[key] = renderer
-    return renderer
-
-
+        _renderer = mujoco.Renderer(model, height=FRAME_HEIGHT, width=FRAME_WIDTH)
+        _renderer_model = model
+        _renderer_camera = camera_name
+    return _renderer
 
 def _encode_jpeg(rgb) -> bytes:
     """Encodes an (H, W, 3) uint8 RGB array as JPEG bytes."""
@@ -79,10 +80,18 @@ def _encode_jpeg(rgb) -> bytes:
     return buf.getvalue()
 
 
-def _render_frame(sim, camera_name: str) -> bytes:
+class _StaleStream(Exception):
+    """Raised when a render belongs to a superseded stream (tab switched)."""
+
+
+def _render_frame(sim, camera_name: str, generation: int) -> bytes:
     """Renders one frame and returns JPEG bytes. Blocking; call via to_thread."""
     global _render_data, _render_data_model
     with _render_lock:
+        if generation != _stream_generation:
+            # Superseded while queued: die without touching the shared renderer,
+            # so only the live camera ever recreates GL state (no flicker).
+            raise _StaleStream(camera_name)
         renderer = _get_renderer(sim.model, camera_name)
         # Snapshot sim state into a private MjData so the 500 Hz physics
         # thread can't tear the camera transform mid-render. Recreate it
@@ -98,9 +107,11 @@ def _render_frame(sim, camera_name: str) -> bytes:
         frame = renderer.render()
     return _encode_jpeg(frame)
 
-async def _frame_generator(camera_name: str, request: Request) -> AsyncIterator[bytes]:
+async def _frame_generator(camera_name: str, request: Request, generation: int) -> AsyncIterator[bytes]:
     interval = 1.0 / STREAM_FPS
     while True:
+        if generation != _stream_generation:
+            return
         if await request.is_disconnected():
             return
         t0 = time.time()
@@ -108,10 +119,11 @@ async def _frame_generator(camera_name: str, request: Request) -> AsyncIterator[
         if sim is None:
             return
         try:
-            jpeg = await asyncio.to_thread(_render_frame, sim, camera_name)
+            jpeg = await asyncio.to_thread(_render_frame, sim, camera_name, generation)
         except Exception:
-            # Sim restarted / renderer invalidated mid-stream: end this
-            # stream; the browser <img> will be re-pointed by the dashboard.
+            # Sim restarted / renderer invalidated / stream superseded
+            # mid-stream: end this stream; the browser <img> will be
+            # re-pointed by the dashboard.
             return
         yield (
             b"--frame\r\n"
@@ -148,6 +160,9 @@ async def fpv_stream(
                 detail=f"Unknown drone '{drone}'. Valid: {sorted(CAMERAS)}",
             )
         camera_name = CAMERAS[drone]
+    global _stream_generation
+    _stream_generation += 1
+    my_generation = _stream_generation
     sim = sim_context.sim
     if sim is None:
         raise HTTPException(
@@ -160,8 +175,25 @@ async def fpv_stream(
             detail=f"Camera '{camera_name}' not found in the loaded MJCF model.",
         )
     return StreamingResponse(
-        _frame_generator(camera_name, request),
+        _frame_generator(camera_name, request, my_generation),
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
     )
+
+
+@router.post("/launch-viewer")
+async def launch_viewer():
+    repo_root = pathlib.Path(__file__).resolve().parents[3]
+    try:
+        subprocess.Popen(["uv", "run", "python", "src/runtime/sim/view_server_sim.py"], cwd=str(repo_root))
+        return {"status": "launched"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sim-state")
+async def sim_state():
+    sim = sim_context.sim
+    if sim is None: raise HTTPException(status_code=503, detail="Sim not running")
+    return {"qpos": sim.data.qpos.tolist(), "time": float(sim.data.time)}
 

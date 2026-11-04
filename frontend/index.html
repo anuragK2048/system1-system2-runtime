@@ -550,33 +550,6 @@
       border-bottom: 2px solid var(--d2-cyan);
     }
 
-    /* View-mode segmented toggle (FPV vs 3rd Person) — same shell as .fpv-tabs */
-    .view-mode-tab {
-      flex: 1;
-      text-align: center;
-      padding: 5px 4px;
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-muted);
-      background: transparent;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .view-mode-tab:hover {
-      color: var(--text-main);
-      background: rgba(255, 255, 255, 0.05);
-    }
-
-    .view-mode-tab.active {
-      color: #FFFFFF;
-      background: #21262D;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-      border-bottom: 2px solid var(--border-focus);
-    }
-
     .fpv-img {
       width: 100%;
       aspect-ratio: 4 / 3;
@@ -1431,9 +1404,8 @@
             <span class="section-title" style="margin: 0;">📷 FPV Camera</span>
             <span style="font-size: 10px; color: var(--text-dim);">640×480 · ~15 FPS</span>
           </div>
-          <div class="fpv-tabs" role="group" aria-label="Camera view mode">
-            <button class="view-mode-tab active" data-viewmode="fpv" id="viewModeFpv">🎥 FPV</button>
-            <button class="view-mode-tab" data-viewmode="third" id="viewModeThird">👀 3rd Person</button>
+          <div style="margin-bottom: 8px;">
+            <button id="launchViewerBtn" class="fpv-tab">Open in MuJoCo Viewer</button>
           </div>
           <div class="fpv-tabs" id="fpvDroneTabs">
             <button class="fpv-tab active" data-fpv="drone2" id="fpvTabD2">🔵 Left (Cyan / D2)</button>
@@ -2036,27 +2008,11 @@
     // Target Tabs
     // Camera view switch (swaps the MJPEG <img> source; no WebSocket).
     // Reassigning src (with a cache-buster) kills the previous MJPEG stream.
-    let fpvViewMode = "fpv";
     let fpvDrone = "drone2";
     function updateFpvStream() {
       const fpvImg = document.getElementById("fpvImg");
-      const src = fpvViewMode === "third"
-        ? `/api/fpv/stream?view=third&t=${Date.now()}`
-        : `/api/fpv/stream?view=fpv&drone=${fpvDrone}&t=${Date.now()}`;
-      fpvImg.src = src;
+      fpvImg.src = `/api/fpv/stream?view=fpv&drone=${fpvDrone}&t=${Date.now()}`;
     }
-
-    // FPV / 3rd-person segmented toggle
-    document.querySelectorAll(".view-mode-tab").forEach(tab => {
-      tab.addEventListener("click", () => {
-        if (tab.dataset.viewmode === fpvViewMode) return;
-        document.querySelectorAll(".view-mode-tab").forEach(t => t.classList.remove("active"));
-        tab.classList.add("active");
-        fpvViewMode = tab.dataset.viewmode;
-        document.getElementById("fpvDroneTabs").style.display = fpvViewMode === "third" ? "none" : "";
-        updateFpvStream();
-      });
-    });
 
     // FPV drone switch (drone1/drone2 tabs, FPV mode only)
     document.querySelectorAll(".fpv-tab").forEach(tab => {
@@ -2066,6 +2022,16 @@
         fpvDrone = tab.dataset.fpv;
         updateFpvStream();
       });
+    });
+
+    document.getElementById("launchViewerBtn").addEventListener("click", async () => {
+      const btn = document.getElementById("launchViewerBtn");
+      btn.disabled = true; btn.textContent = "Opening...";
+      try {
+        const r = await fetch("/api/fpv/launch-viewer", {method: "POST"});
+        btn.textContent = r.ok ? "✓ Viewer launched" : "Failed: " + r.status;
+      } catch(e) { btn.textContent = "Failed: " + e.message; }
+      setTimeout(() => { btn.disabled = false; btn.textContent = "Open in MuJoCo Viewer"; }, 3000);
     });
 
     document.querySelectorAll(".target-tab").forEach(tab => {
