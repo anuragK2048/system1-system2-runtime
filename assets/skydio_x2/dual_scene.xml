@@ -51,6 +51,14 @@
       <camera name="dual_track" pos="-3.4 0 1.2" xyaxes="0 -1 0 0.35 0 1" mode="track"/>
     </body>
 
+    <!-- Fixed 3rd-person arena camera for the dashboard (view=third):
+         ~4.5 m from the arena midpoint [0,0,1.0], slightly elevated,
+         looking toward +X/down at both drones. xyaxes: x=[0,-1,0] puts
+         the Y-separated drones across the frame; y tilts up accordingly
+         (cross(x,y) gives the camera z-axis, view dir is -z). -->
+    <camera name="arena_3rd" pos="-4.3 0 2.2" xyaxes="0 -1 0 0 0 1" fovy="45"/>
+
+
     <!-- Visual Target Landing Pads on the Floor for Reference -->
     <!-- Drone 1 Target Pad (Orange / Right, Nominal Target: X=0, Y=-1.2m) -->
     <geom name="d1_target_pad" type="cylinder" size="0.40 0.002" pos="0 -1.2 0.002" rgba="1.0 0.40 0.0 0.35" contype="0" conaffinity="0"/>

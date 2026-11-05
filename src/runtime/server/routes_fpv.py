@@ -1,9 +1,10 @@
-"""FPV camera MJPEG streaming for the web dashboard.
+"""FPV / 3rd-person camera MJPEG streaming for the web dashboard.
 
 Serves a first-person-view feed from a MuJoCo camera rigidly attached to a
 drone body (see ``d1_fpv`` / ``d2_fpv`` in ``assets/skydio_x2/dual_scene.xml``),
-so the view tilts with the drone. Consumed by a plain ``<img>`` tag as
-``multipart/x-mixed-replace`` -- no WebSocket involved.
+so the view tilts with the drone, or -- with ``?view=third`` -- a 3rd-person
+feed from the fixed ``arena_3rd`` camera in the same scene. Consumed by a
+plain ``<img>`` tag as ``multipart/x-mixed-replace`` -- no WebSocket involved.
 
 Cross-Platform Compatibility Notes:
   - MuJoCo offscreen GL contexts (CGL on macOS, WGL on Windows) are thread-bound.
@@ -22,6 +23,8 @@ import asyncio
 import concurrent.futures
 import io
 import math
+import pathlib
+import subprocess
 import threading
 import time
 from typing import AsyncIterator, Optional
@@ -80,11 +83,18 @@ CAMERAS = {
     "fpv": "fpv",
 }
 
+# Fixed 3rd-person camera (worldbody in dual_scene.xml, overlooking arena).
+THIRD_PERSON_CAMERA = "arena_3rd"
+VIEWS = ("fpv", "third")
+
 _renderer: Optional[mujoco.Renderer] = None
 _renderer_model: Optional[mujoco.MjModel] = None
+_renderer_camera: Optional[str] = None
 _hud_projector: Optional[HUDProjector] = None
 _render_lock = threading.Lock()
 _render_data: Optional[mujoco.MjData] = None
+_render_data_model: Optional[mujoco.MjModel] = None
+_stream_generation = 0
 
 # (for macOS & Windows cross-platform compatibility: OpenGL offscreen contexts
 # - CGL on macOS, WGL on Windows - are thread-bound. Calling renderer functions across
@@ -105,10 +115,12 @@ def _get_render_pool() -> concurrent.futures.ThreadPoolExecutor:
     return _render_pool
 
 
-def _get_renderer(model: mujoco.MjModel) -> mujoco.Renderer:
-    """Returns the shared renderer, (re)creating it if the model changed."""
-    global _renderer, _renderer_model
-    if _renderer is None or _renderer_model is not model:
+def _get_renderer(model: mujoco.MjModel, camera_name: str) -> mujoco.Renderer:
+    """Single shared renderer, recreated when model or camera changes.
+    (Multiple simultaneous renderers exhaust GL contexts on Windows;
+    reusing one across cameras corrupts its scene state.)"""
+    global _renderer, _renderer_model, _renderer_camera
+    if _renderer is None or _renderer_model is not model or _renderer_camera != camera_name:
         if _renderer is not None:
             try:
                 _renderer.close()
@@ -116,6 +128,7 @@ def _get_renderer(model: mujoco.MjModel) -> mujoco.Renderer:
                 pass
         _renderer = mujoco.Renderer(model, height=FRAME_HEIGHT, width=FRAME_WIDTH)
         _renderer_model = model
+        _renderer_camera = camera_name
     return _renderer
 
 
@@ -137,12 +150,12 @@ def cleanup_renderer() -> None:
     (for macOS & Windows cross-platform compatibility: cleanly releases the OpenGL context
     on the exact thread that initialized it to avoid driver crashes on shutdown.)
     """
-    global _renderer, _renderer_model, _render_data, _render_pool, _hud_projector
+    global _renderer, _renderer_model, _renderer_camera, _render_data, _render_data_model, _render_pool, _hud_projector
     if _render_pool is None:
         return
 
     def _do_close():
-        global _renderer, _renderer_model, _render_data, _hud_projector
+        global _renderer, _renderer_model, _renderer_camera, _render_data, _render_data_model, _hud_projector
         with _render_lock:
             if _renderer is not None:
                 try:
@@ -151,7 +164,9 @@ def cleanup_renderer() -> None:
                     pass
                 _renderer = None
                 _renderer_model = None
+                _renderer_camera = None
                 _render_data = None
+                _render_data_model = None
                 _hud_projector = None
 
     try:
@@ -163,7 +178,7 @@ def cleanup_renderer() -> None:
     _render_pool = None
 
 
-def _encode_jpeg(rgb: np.ndarray) -> bytes:
+def _encode_jpeg(rgb) -> bytes:
     """Encodes an (H, W, 3) uint8 RGB array as JPEG bytes."""
     from PIL import Image
 
@@ -172,13 +187,23 @@ def _encode_jpeg(rgb: np.ndarray) -> bytes:
     return buf.getvalue()
 
 
-def _render_frame(sim, camera_name: str, enable_hud: bool = True) -> bytes:
+class _StaleStream(Exception):
+    """Raised when a render belongs to a superseded stream (tab switched)."""
+
+
+def _render_frame(sim, camera_name: str, generation: int, enable_hud: bool = True) -> bytes:
     """Renders one frame and returns JPEG bytes. Blocking; called on dedicated render thread."""
-    global _render_data
+    global _render_data, _render_data_model
     with _render_lock:
-        renderer = _get_renderer(sim.model)
-        if _render_data is None:
+        if generation != _stream_generation:
+            # Superseded while queued: die without touching the shared renderer,
+            # so only the live camera ever recreates GL state (no flicker).
+            raise _StaleStream(camera_name)
+
+        renderer = _get_renderer(sim.model, camera_name)
+        if _render_data is None or _render_data_model is not sim.model:
             _render_data = mujoco.MjData(sim.model)
+            _render_data_model = sim.model
 
         # (for macOS & Windows cross-platform thread safety: snapshot simulation qpos/qvel
         # under physics_lock to prevent mid-step state tearing while physics loop runs concurrently)
@@ -232,7 +257,12 @@ def _render_frame(sim, camera_name: str, enable_hud: bool = True) -> bytes:
         return _encode_jpeg(frame)
 
 
-async def _frame_generator(camera_name: str, request: Request, enable_hud: bool = True) -> AsyncIterator[bytes]:
+async def _frame_generator(
+    camera_name: str,
+    request: Request,
+    generation: int,
+    enable_hud: bool = True,
+) -> AsyncIterator[bytes]:
     interval = 1.0 / STREAM_FPS
     loop = asyncio.get_running_loop()
     pool = _get_render_pool()
@@ -240,6 +270,8 @@ async def _frame_generator(camera_name: str, request: Request, enable_hud: bool 
     # (for macOS & Windows cross-platform compatibility: check shutdown_event every loop
     # to terminate stream immediately on Ctrl+C without waiting for uvicorn timeout)
     while not sim_context.shutdown_event.is_set():
+        if generation != _stream_generation:
+            return
         if await request.is_disconnected():
             return
         t0 = time.time()
@@ -248,7 +280,11 @@ async def _frame_generator(camera_name: str, request: Request, enable_hud: bool 
             await asyncio.sleep(0.1)
             continue
         try:
-            jpeg = await loop.run_in_executor(pool, _render_frame, sim, camera_name, enable_hud)
+            jpeg = await loop.run_in_executor(
+                pool, _render_frame, sim, camera_name, generation, enable_hud
+            )
+        except _StaleStream:
+            return
         except asyncio.CancelledError:
             return
         except Exception:
@@ -269,17 +305,40 @@ async def _frame_generator(camera_name: str, request: Request, enable_hud: bool 
 @router.get("/stream")
 async def fpv_stream(
     request: Request,
-    drone: str = Query("drone2", pattern="^(drone1|drone2|drone|single|fpv)$"),
+    drone: str = Query("drone2"),
+    view: str = Query("fpv"),
     hud: bool = Query(True, description="Overlay calibrated avionics HUD (ground rings, horizon, aperture frames)"),
 ) -> StreamingResponse:
-    """MJPEG stream from the selected drone's body-fixed FPV camera."""
+    """MJPEG stream: FPV from a drone camera, or 3rd-person arena view.
+
+    ``view=fpv`` (default) uses ``drone`` (drone1|drone2|drone|single|fpv); ``view=third``
+    uses the fixed ``arena_3rd`` camera and ignores ``drone``. Unknown
+    ``view`` (or unknown ``drone`` in FPV mode) -> 422.
+    """
+    if view not in VIEWS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown view '{view}'. Valid: {list(VIEWS)}",
+        )
+    if view == "third":
+        camera_name = THIRD_PERSON_CAMERA
+    else:
+        if drone not in CAMERAS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown drone '{drone}'. Valid: {sorted(CAMERAS)}",
+            )
+        camera_name = CAMERAS[drone]
+
+    global _stream_generation
+    _stream_generation += 1
+    my_generation = _stream_generation
     sim = sim_context.sim
     if sim is None:
         raise HTTPException(
             status_code=503,
             detail="Simulator is not running; start the viewer or --headless server first.",
         )
-    camera_name = CAMERAS.get(drone, "fpv")
     if mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name) < 0:
         # Fallback resolution across single and dual drone scene models:
         # If camera not found by mapped name, try fallback candidates
@@ -297,7 +356,25 @@ async def fpv_stream(
                 detail=f"Camera '{camera_name}' not found in the loaded MJCF model.",
             )
     return StreamingResponse(
-        _frame_generator(camera_name, request, enable_hud=hud),
+        _frame_generator(camera_name, request, my_generation, enable_hud=hud),
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
     )
+
+
+@router.post("/launch-viewer")
+async def launch_viewer():
+    repo_root = pathlib.Path(__file__).resolve().parents[3]
+    try:
+        subprocess.Popen(["uv", "run", "python", "src/runtime/sim/view_server_sim.py"], cwd=str(repo_root))
+        return {"status": "launched"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sim-state")
+async def sim_state():
+    sim = sim_context.sim
+    if sim is None:
+        raise HTTPException(status_code=503, detail="Sim not running")
+    return {"qpos": sim.data.qpos.tolist(), "time": float(sim.data.time)}

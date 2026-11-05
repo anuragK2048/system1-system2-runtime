@@ -25,6 +25,7 @@ from runtime.server.state import sim_context
 from runtime.server.routes_chaos import router as chaos_router
 from runtime.server.routes_telemetry import router as telemetry_router
 from runtime.server.routes_fpv import router as fpv_router
+from runtime.server.routes_setup import router as setup_router
 from runtime.server.stream import telemetry_websocket_endpoint
 
 
@@ -68,6 +69,7 @@ def create_app() -> FastAPI:
     app.include_router(chaos_router)
     app.include_router(telemetry_router)
     app.include_router(fpv_router)
+    app.include_router(setup_router)
 
     # Mount WebSocket telemetry stream
     app.add_api_websocket_route("/ws/telemetry", telemetry_websocket_endpoint)
@@ -76,11 +78,18 @@ def create_app() -> FastAPI:
     from fastapi.responses import FileResponse
 
     frontend_index = Path(__file__).resolve().parents[3] / "frontend" / "index.html"
+    frontend_setup = Path(__file__).resolve().parents[3] / "frontend" / "setup.html"
 
     @app.get("/")
     def root():
         if frontend_index.exists():
             return FileResponse(str(frontend_index))
+        return {"status": "online", "docs": "/docs"}
+
+    @app.get("/setup")
+    def setup_page():
+        if frontend_setup.exists():
+            return FileResponse(str(frontend_setup))
         return {"status": "online", "docs": "/docs"}
 
     @app.get("/api")

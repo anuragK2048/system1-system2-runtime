@@ -33,6 +33,12 @@ from runtime.sim.system1_controller import System1Controller
 from runtime.sim.chaos_injector import ChaosManager
 from runtime.sim.bridge import System1System2Bridge
 
+# Wind calibration: force_N = WIND_FORCE_PER_V2 * v_ms**2, i.e. the drag
+# equation F = 0.5 * rho * CdA * v^2 with rho = 1.225 kg/m^3 and an effective
+# CdA = 0.106 m^2 for the X2 airframe. Calibrated so 10 m/s ~= 6.5 N, matching
+# the existing 6.5N crosswind chaos preset.
+WIND_FORCE_PER_V2 = 0.5 * 1.225 * 0.106
+
 
 class DualDroneSimulator:
     """Manages the full lifecycle of a dual-drone comparative MuJoCo simulation.
@@ -64,11 +70,20 @@ class DualDroneSimulator:
         l1_cfg: Optional[L1Config] = None,
         chaos_cfg: Optional[ChaosConfig] = None,
         s2_cfg: Optional[System2MasterConfig] = None,
+        payload_kg: float = 0.0,
+        wind_ms: float = 0.0,
+        drone_preset: str = "x2_stock",
     ) -> None:
         self.drone1_mode = drone1_mode.lower().strip()
         self.drone2_mode = drone2_mode.lower().strip()
         self.llm_provider = llm_provider
         self.llm_model = llm_model
+        # Mission-setup parameters (see runtime.server.routes_setup). Stored so
+        # the setup route can tell which preset a running sim was launched with.
+        self.payload_kg = float(payload_kg)
+        self.wind_ms = float(wind_ms)
+        self.wind_force_n = WIND_FORCE_PER_V2 * self.wind_ms ** 2
+        self.drone_preset = drone_preset
 
         if self.drone1_mode not in self.SUPPORTED_MODES:
             raise ValueError(
@@ -186,6 +201,20 @@ class DualDroneSimulator:
         # MuJoCo Engine Initialization
         # ----------------------------------------------------------------------
         self.model = mujoco.MjModel.from_xml_path(str(self.scene_path))
+        # Payload mass override: replace the XML's fixed 0.35 kg bob mass on
+        # both payload bodies with the mission payload, before MjData exists
+        # so the physics state is built with the requested mass.
+        for payload_body_name in ("d1_payload", "d2_payload"):
+            payload_body_id = mujoco.mj_name2id(
+                self.model, mujoco.mjtObj.mjOBJ_BODY, payload_body_name
+            )
+            if payload_body_id >= 0 and float(self.payload_kg) > 0.0:
+    # Override the XML 0.35 kg bob only when a real payload is
+    # requested. When payload_kg=0, keep the XML default so the
+    # chaos payload physics behaves as it originally did.
+                self.model.body_mass[payload_body_id] = float(self.payload_kg)
+
+
         self.data = mujoco.MjData(self.model)
         self.model.opt.timestep = self.sim_cfg.physics_timestep
 
@@ -239,6 +268,15 @@ class DualDroneSimulator:
         # (for macOS & Windows cross-platform thread safety: coordinates physics steps,
         # resets, and offscreen camera snapshots so concurrent threads don't corrupt MjData on either OS)
         self.physics_lock = threading.Lock()
+
+        # Mission-setup startup state: attach the payload (if any) and apply
+        # the sustained wind through the normal chaos path, so telemetry/HUD
+        # report them exactly like dashboard-applied chaos.
+        if self.payload_kg > 0.0:
+            self.chaos.set_payload_attached(
+                True, mass=self.payload_kg, aerodynamic_drag=True
+            )
+        self.chaos.set_wind_force(fx=float(self.wind_force_n), fy=0.0, fz=0.0)
 
         # Initialize physics state
         self.reset_simulation()
